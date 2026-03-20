@@ -1,0 +1,10 @@
+google-api-python-client
+beautifulsoup4
+requests
+python-dotenv
+yfinance
+openai
+langchain
+schedule
+langchain-openai
+langchain-google-genai
