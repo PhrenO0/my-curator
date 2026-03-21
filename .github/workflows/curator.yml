@@ -2,28 +2,26 @@ name: Daily AI Curator
 
 on:
   schedule:
-    # 한국 시간(KST) 기준: 오전 8시, 오후 1시, 오후 7시
     - cron: '0 23,4,10 * * *'
-  workflow_dispatch: # 수동으로도 실행할 수 있도록 버튼 추가
+  workflow_dispatch:
 
 jobs:
   run-curator:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # history.json 업데이트를 위해 쓰기 권한 필요
+      contents: write
       
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Install Dependencies
         run: |
-          cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -37,13 +35,11 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
         run: |
-          cd backend
-          python main.py
+          python curator_bot.py
 
       - name: Commit and Push History
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add backend/history.json
-          # history.json에 변경사항이 있을 때만 커밋
+          git add history.json
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update scraping history" && git push)
