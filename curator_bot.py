@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import urllib.parse
 import requests
@@ -55,6 +56,57 @@ def get_naver_blog(query, display=5):
         return [{"title": "[블로그] " + BeautifulSoup(i["title"], "html.parser").get_text(), "description": BeautifulSoup(i["description"], "html.parser").get_text(), "link": i["link"]} for i in response.json().get("items", [])]
     except: return []
 
+def get_dev_events(max_events=8):
+    """Scrape current-month developer events from the brave-people/Dev-Event repo README."""
+    url = "https://raw.githubusercontent.com/brave-people/Dev-Event/master/README.md"
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        lines = resp.text.splitlines()
+    except Exception as e:
+        print(f"Dev-Event fetch error: {e}")
+        return []
+
+    now = datetime.now()
+    # Section header looks like: ## `26년 06월`
+    header_token = f"{now.year % 100}년 {now.month:02d}월"
+
+    # Find the current-month section and collect lines until the next "## " header.
+    section, capturing = [], False
+    for line in lines:
+        if line.startswith("## "):
+            if capturing:
+                break
+            capturing = header_token in line
+            continue
+        if capturing:
+            section.append(line)
+
+    events = []
+    current = None
+    title_re = re.compile(r"^-\s+__\[(.*)\]\((https?[^)]+)\)__\s*$")
+    for line in section:
+        m = title_re.match(line)
+        if m:
+            if current:
+                events.append(current)
+            current = {"title": m.group(1).strip(), "link": m.group(2).strip(),
+                       "category": "", "host": "", "date": ""}
+            continue
+        if not current:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("- 분류:"):
+            current["category"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("- 주최:"):
+            current["host"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("- 접수:") or stripped.startswith("- 일시:"):
+            current["date"] = stripped.split(":", 1)[1].strip()
+    if current:
+        events.append(current)
+
+    return events[:max_events]
+
 def get_stock_summary(tickers):
     summary = []
     for ticker in tickers:
@@ -101,7 +153,7 @@ def master_curate(all_items):
         return json.loads(content)
     except: return []
 
-def generate_html_report(finance_data, curated_results):
+def generate_html_report(finance_data, curated_results, dev_events=None):
     html = f"<html><body style='font-family: sans-serif;'><h1 style='color: #2c3e50;'>📈 [나만의 큐레이터] 일일 리포트 ({datetime.now().strftime('%Y-%m-%d')})</h1>"
     html += "<h2>📊 증시 요약</h2><table border='1' cellspacing='0' cellpadding='5'><tr><th>종목</th><th>현재가</th><th>등락률</th></tr>"
     for s in finance_data:
@@ -115,6 +167,17 @@ def generate_html_report(finance_data, curated_results):
         html += f"<p>💡 <b>분석:</b> {item.get('analysis','')}</p>"
         if item.get("investment_insight"): html += f"<p style='background:#f1c40f22; padding:5px;'>💰 <b>투자 시사점:</b> {item.get('investment_insight')}</p>"
         html += "</div><hr/>"
+    if dev_events:
+        html += "<h2>👩‍💻 개발자 행사/이벤트 (Dev-Event)</h2>"
+        for ev in dev_events:
+            html += f"<div style='margin-bottom:10px;'><a href='{ev.get('link','#')}'><b>{ev.get('title','')}</b></a>"
+            meta = []
+            if ev.get("category"): meta.append(f"🏷️ {ev['category']}")
+            if ev.get("host"): meta.append(f"주최: {ev['host']}")
+            if ev.get("date"): meta.append(f"접수/일시: {ev['date']}")
+            if meta: html += f"<p style='margin:2px 0; color:#555; font-size:0.9em;'>{' · '.join(meta)}</p>"
+            html += "</div>"
+        html += "<p style='font-size:0.8em; color:#999;'>출처: <a href='https://github.com/brave-people/Dev-Event'>brave-people/Dev-Event</a></p><hr/>"
     html += "</body></html>"
     return html
 
@@ -133,11 +196,18 @@ def run_curator():
             if url and url not in sent_history: all_raw_items.append(item)
                 
     curated = master_curate(all_raw_items)
-    report = generate_html_report(finance_data, curated)
-    
+
+    # Developer events from brave-people/Dev-Event (factual & time-sensitive, not LLM-curated)
+    dev_events = [ev for ev in get_dev_events() if ev.get("link") and ev["link"] not in sent_history]
+    print(f"📅 Dev events collected (excluding duplicates): {len(dev_events)}")
+
+    report = generate_html_report(finance_data, curated, dev_events)
+
     new_hist = list(sent_history)
     for c in curated:
         if c.get("original_link"): new_hist.append(c["original_link"])
+    for ev in dev_events:
+        new_hist.append(ev["link"])
     save_history(new_hist)
     
     sender = os.environ.get("SENDER_EMAIL")
