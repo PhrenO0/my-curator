@@ -127,6 +127,8 @@ def build_prompt(state, today, deadlines, balance_counts, weakest, mode):
 - 약점/처방: {v['weakness']}
 - 신앙: {v['faith']}
 
+[5개년 목표(사다리)] {json.dumps(state.get("goals", {}), ensure_ascii=False)}
+
 [오늘] {today.strftime('%Y-%m-%d')} ({weekday})
 [마감 카운트다운] {json.dumps(deadlines, ensure_ascii=False)}
 [9개 영역 활동 분포] {json.dumps(balance_counts, ensure_ascii=False)}
@@ -259,6 +261,23 @@ def run(mode="daily"):
     today = kst_today()
     deadlines = compute_deadlines(state, today)
     counts, weakest = compute_balance(state)
+
+    if mode == "pull":                                     # 한마디면 전 소스 끌어오기
+        brief = think(state, today, deadlines, counts, weakest, "weekly")
+        html = render_html(state, today, brief, deadlines, counts, "weekly")
+        try:
+            from radar import collect as r_collect, curate as r_curate, render as r_render
+            opps, threads = r_collect()
+            print(f"[PULL] 레이더 수집: 기회 {len(opps)} · Threads {len(threads)}")
+            radar_html = r_render(r_curate(opps, threads), today.strftime("%Y-%m-%d"))
+        except Exception as e:
+            radar_html = f"<p style='color:#999'>레이더 스킵: {e}</p>"
+        combined = html + "<hr style='margin:32px 0'/>" + radar_html
+        send_email(f"🌊 neural-flow 전체 브리핑 · {today.strftime('%m/%d')}", combined)
+        send_telegram(build_text(today, brief, deadlines))
+        maybe_write_back(state, today, brief)
+        print("✅ pull(전체) 완료")
+        return
 
     if mode == "checkin":                                  # 저녁 양방향 체크인
         brief = think(state, today, deadlines, counts, weakest, "daily")

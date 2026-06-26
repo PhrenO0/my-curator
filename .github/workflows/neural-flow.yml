@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'daily | weekly | checkin | radar'
+        description: 'daily | weekly | checkin | radar | pull'
         required: false
         default: 'daily'
 
