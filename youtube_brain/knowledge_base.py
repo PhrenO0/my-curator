@@ -207,6 +207,8 @@ class KnowledgeBase:
             v = _load(r["embedding"])
             if v:
                 scored.append((cosine(qv, v), r["video_id"]))
+        if not scored:  # 저장된 임베딩이 전부 손상 → 키워드검색으로 폴백
+            return None
         scored.sort(reverse=True)
         out = []
         for score, vid in scored[:k]:
@@ -259,20 +261,26 @@ class KnowledgeBase:
             print(f"[kb] JSONL export 실패: {e}")
 
     def _seed_from_jsonl(self):
-        n = 0
         try:
             with open(self.jsonl_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    self._insert_record(json.loads(line))
-                    n += 1
-            self.conn.commit()
-            if n:
-                print(f"[kb] knowledge.jsonl 에서 {n}개 지식 복원")
+                lines = f.readlines()
         except Exception as e:
-            print(f"[kb] JSONL seed 실패: {e}")
+            print(f"[kb] JSONL 읽기 실패: {e}")
+            return
+        n, bad = 0, 0
+        for line in lines:  # 한 줄이 손상돼도(병합충돌 마커·잘린 마지막 줄) 나머지는 살린다
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                self._insert_record(json.loads(line))
+                n += 1
+            except Exception as e:
+                bad += 1
+                print(f"[kb] 손상된 JSONL 줄 건너뜀: {e}")
+        self.conn.commit()
+        if n or bad:
+            print(f"[kb] knowledge.jsonl 에서 {n}개 복원" + (f" ({bad}개 손상 줄 건너뜀)" if bad else ""))
 
     def _insert_record(self, rec):
         vid = rec["video_id"]

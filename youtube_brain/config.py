@@ -82,6 +82,8 @@ def loads_json(raw):
 
 def cosine(a, b):
     """두 벡터의 코사인 유사도(neural-flow/coverletter 와 동일 구현)."""
+    if not a or not b or len(a) != len(b):  # 임베딩 모델이 바뀌어 차원이 다르면 매칭 무효
+        return 0.0
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))

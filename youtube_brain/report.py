@@ -51,12 +51,21 @@ def render_answer_console(res):
     L = [_LINE, f"❓ {res.get('question', '')}", _LINE]
     if res.get("answer"):
         L.append(res["answer"])
+        L.append("\n[출처 — 내 지식DB]")
+        for i, s in enumerate(res.get("sources", []), 1):
+            L.append(f"  [{i}] {s.get('title', '')}  ({s.get('url', '')})")
+    elif res.get("sources"):
+        # LLM 키 없을 때도 빈손이 아니게: 저장된 카드에서 바로 발췌해 보여준다
+        for i, s in enumerate(res["sources"], 1):
+            L.append(f"\n[{i}] {s.get('title', '')}  ({s.get('url', '')})")
+            if s.get("one_liner"):
+                L.append(f"    💡 {s['one_liner']}")
+            for t in (s.get("tl_dr") or [])[:3]:
+                L.append(f"    • {t}")
+            for t in (s.get("takeaways") or [])[:2]:
+                L.append(f"    → {t}")
     if res.get("note"):
         L.append(f"\nℹ️  {res['note']}")
-    if res.get("sources"):
-        L.append("\n[출처 — 내 지식DB]")
-        for i, s in enumerate(res["sources"], 1):
-            L.append(f"  [{i}] {s.get('title', '')}  ({s.get('url', '')})")
     L.append(_LINE)
     return "\n".join(L)
 

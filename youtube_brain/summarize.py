@@ -57,6 +57,8 @@ def summarize_video(meta, transcript_text, llm=None):
     else:
         try:
             card = _map_reduce(title, body, llm) if len(body) > MAP_TRIGGER else _summarize_once(title, desc, body, llm)
+            if not isinstance(card, dict):  # LLM이 객체가 아닌 배열/스칼라를 반환하면 폴백
+                raise ValueError(f"카드가 JSON 객체가 아님(type={type(card).__name__})")
             engine, model = "gemini", os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
         except Exception as e:
             print(f"[summarize] LLM 요약 실패 → 휴리스틱 폴백: {e}")
@@ -118,13 +120,22 @@ def _chunk(text, size):
             cur, cur_len = [], 0
     if cur:
         chunks.append(" ".join(cur))
-    return chunks or [text]
+    chunks = chunks or [text]
+    # 공백이 거의 없는 자막(CJK 자동자막 등)은 단어 분할이 안 먹으므로 문자 단위로 강제 분할
+    out = []
+    for c in chunks:
+        if len(c) > size * 1.5:
+            out += [c[i:i + size] for i in range(0, len(c), size)]
+        else:
+            out.append(c)
+    return out
 
 
 def _heuristic_card(title, body):
     """LLM 없이도 카드를 만든다 — 앞 문장 추출 + 단어빈도 키워드."""
     sents = [s.strip() for s in re.split(r"(?<=[.!?。])\s+|\n+", body) if len(s.strip()) > 10]
-    words = re.findall(r"[가-힣]{2,}|[A-Za-z]{3,}", body.lower())
+    # {2,16} 상한: 공백 없는 CJK 자막에서 본문 전체가 하나의 거대 토큰이 되는 것을 방지
+    words = re.findall(r"[가-힣]{2,16}|[A-Za-z]{3,}", body.lower())
     keywords = [w for w, _ in Counter(w for w in words if w not in _STOP).most_common(10)]
     return {
         "one_liner": title or (sents[0] if sents else ""),
@@ -141,7 +152,9 @@ def _heuristic_card(title, body):
 
 def _normalize_card(card):
     """모든 키 존재·타입 보장(리스트/문자열)."""
-    card = dict(card or {})
+    if not isinstance(card, dict):  # 방어: 배열/스칼라가 흘러들어와도 빈 카드로
+        card = {}
+    card = dict(card)
     for k in _LIST_KEYS:
         v = card.get(k, [])
         if isinstance(v, str):

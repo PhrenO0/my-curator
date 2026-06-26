@@ -29,7 +29,9 @@ def extract_video_id(s):
         m = pat.search(s)
         if m:
             return m.group(1)
-    if re.fullmatch(r"[A-Za-z0-9_-]{11}", s):  # 맨 ID 만 준 경우
+    # 맨 ID 만 준 경우 — 단, 11자 영소문자 단어(키워드)를 ID로 오인하지 않도록
+    # 실제 video_id 는 거의 항상 대문자/숫자/-/_ 를 포함한다.
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", s) and re.search(r"[A-Z0-9_-]", s):
         return s
     return None
 
