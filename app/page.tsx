@@ -79,6 +79,44 @@ export default function Page() {
     })
     .sort((a, b) => daysBetween(a.date!, today) - daysBetween(b.date!, today));
 
+  // 인생수레바퀴 (Wheel of Life) — 9영역 0~10 레이더
+  const wheelScores = ((state as unknown as {
+    wheel_of_life?: { scores?: Record<string, number> };
+  }).wheel_of_life?.scores ?? {}) as Record<string, number>;
+  const wheelR = 86;
+  const wheelC = 110;
+  const wheel = (state.domains as unknown as { name: string }[]).map((dm, i) => {
+    const ang = (-90 + i * (360 / 9)) * (Math.PI / 180);
+    const score = wheelScores[dm.name] ?? 0;
+    const r = (score / 10) * wheelR;
+    return {
+      name: dm.name,
+      emoji: dm.name.split(" ")[0],
+      score,
+      color: DOMAIN_COLOR[dm.name] ?? "#94a3b8",
+      x: wheelC + r * Math.cos(ang),
+      y: wheelC + r * Math.sin(ang),
+      ax: wheelC + wheelR * Math.cos(ang),
+      ay: wheelC + wheelR * Math.sin(ang),
+      lx: wheelC + (wheelR + 16) * Math.cos(ang),
+      ly: wheelC + (wheelR + 16) * Math.sin(ang),
+    };
+  });
+  const wheelPoly = wheel.map((w) => `${w.x.toFixed(1)},${w.y.toFixed(1)}`).join(" ");
+  const wheelAvg = (wheel.reduce((s, w) => s + w.score, 0) / (wheel.length || 1)).toFixed(1);
+  const wheelLow = [...wheel].sort((a, b) => a.score - b.score).slice(0, 2);
+
+  // 커리어맵 v2
+  const cm = (state.goals as unknown as { career_map?: any }).career_map;
+  const cmYearKey: string | undefined = cm?.skill_tree
+    ? Object.keys(cm.skill_tree).find((k) => k.startsWith(String(today.getFullYear()))) ??
+      Object.keys(cm.skill_tree)[0]
+    : undefined;
+  const cmYear = cmYearKey ? cm.skill_tree[cmYearKey] : undefined;
+  const cmGate = cm?.decision_gates
+    ? (Object.values(cm.decision_gates)[0] as string)
+    : undefined;
+
   const card: CSSProperties = {
     background: "#1e293b",
     borderRadius: 16,
@@ -129,6 +167,31 @@ export default function Page() {
         )}
       </section>
 
+      {/* 커리어맵 v2 */}
+      {cm && (
+        <section style={{ ...card, border: "1px solid #38bdf855" }}>
+          <h2 style={h2}>🧭 커리어맵 · {cm.version}</h2>
+          <div style={{ fontWeight: 700, lineHeight: 1.5, marginBottom: 10 }}>
+            {cm.positioning}
+          </div>
+          {cmYear && (
+            <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.7 }}>
+              <div>
+                <b style={{ color: "#38bdf8" }}>올해 · {cmYearKey}</b>
+              </div>
+              <div>· 역량: {cmYear.역량}</div>
+              <div>· 증명물: {cmYear.증명물}</div>
+              <div>· 게이트: {cmYear.게이트}</div>
+            </div>
+          )}
+          {cmGate && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+              ⛳ 다음 분기: {cmGate}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* 마감 카운트다운 */}
       <section style={card}>
         <h2 style={h2}>⏳ 마감 카운트다운</h2>
@@ -178,6 +241,61 @@ export default function Page() {
               </span>
             );
           })}
+        </div>
+      </section>
+
+      {/* 인생수레바퀴 */}
+      <section style={card}>
+        <h2 style={h2}>🛞 인생수레바퀴 · 평균 {wheelAvg}/10</h2>
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <svg viewBox="0 0 220 220" width="100%" style={{ maxWidth: 320 }}>
+            {[2, 4, 6, 8, 10].map((g) => (
+              <circle
+                key={g}
+                cx={wheelC}
+                cy={wheelC}
+                r={(g / 10) * wheelR}
+                fill="none"
+                stroke="#334155"
+                strokeWidth={0.5}
+              />
+            ))}
+            {wheel.map((w) => (
+              <line
+                key={w.name}
+                x1={wheelC}
+                y1={wheelC}
+                x2={w.ax}
+                y2={w.ay}
+                stroke="#334155"
+                strokeWidth={0.5}
+              />
+            ))}
+            <polygon
+              points={wheelPoly}
+              fill="#38bdf833"
+              stroke="#38bdf8"
+              strokeWidth={1.5}
+            />
+            {wheel.map((w) => (
+              <circle key={w.name} cx={w.x} cy={w.y} r={2.5} fill={w.color} />
+            ))}
+            {wheel.map((w) => (
+              <text
+                key={w.name}
+                x={w.lx}
+                y={w.ly}
+                fontSize={11}
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {w.emoji}
+              </text>
+            ))}
+          </svg>
+        </div>
+        <div style={{ textAlign: "center", fontSize: 12, color: "#64748b", marginTop: 6 }}>
+          보강 영역: {wheelLow.map((w) => `${w.emoji} ${w.score}`).join(" · ")}
         </div>
       </section>
 
