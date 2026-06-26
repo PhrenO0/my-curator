@@ -34,6 +34,8 @@ next-env.d.ts
 # neural-flow generated previews
 neural-flow/brief_preview.html
 neural-flow/radar_preview.html
+neural-flow/coverletter_output.md
+neural-flow/job_input.json
 
 # python
 __pycache__/

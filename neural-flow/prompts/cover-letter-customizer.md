@@ -42,3 +42,28 @@
 - **문항별 추천 소재:** 지원동기→E-Nudge/Mind Palace · 직무역량→AdGuard/A.INUS · 협업→시퓨즈/멘토링 · 도전→Mind Palace.
 - **약점 다룰 때:** "아이디어 과확장 → '기능 다이어트'(핵심 흐름 하나 못 박기)"로 전환 서술 (위러브 자소서 4번 참고).
 - **회사 톤 리서치가 없으면:** 먼저 채용공고·최근 뉴스를 웹에서 찾아 인재상·사업방향을 확보한 뒤 커스텀.
+
+---
+
+## 🤖 자동화 엔진 (coverletter.py) — 멀티에이전트 RAG
+
+이 프롬프트를 **코드로 굴리는** 버전. 단일 LLM이 아니라 2026 트렌드인 검색(RAG)+멀티에이전트 구조.
+
+```
+공고 입력 → ① RETRIEVE(경험 DB에서 문항별 최적 소재 검색)
+         → ② RESEARCH(기업 톤·핵심가치·언어 정리)
+         → ③ DRAFT(3각도 초안: 문제정의형/성과근거형/메시지연출형)
+         → ④ SYNTHESIZE(가장 강한 뼈대로 통합)
+         → ⑤ DE-AI(상투어·em-dash·'A 아니라 B' 반복·외부사례 자동 검열)
+```
+
+**쓰는 법**
+1. `job_input.example.json` → `job_input.json` 으로 복사, 공고·문항·글자수 채우기.
+2. `python neural-flow/coverletter.py` (또는 `NEURAL_FLOW_MODE=coverletter python neural-flow/agent.py`).
+3. 결과: `coverletter_output.md` + (메일 설정 시) 메일.
+
+**재료 DB:** `experiences.json` (경험 자산 10개, 키워드 태깅). 경험을 추가하려면 keywords를 채워 넣기만 하면 검색에 잡힌다. 숫자·근거(`proof`)는 **절대 변경 금지**.
+
+**GOOGLE_API_KEY 없을 때:** ⑤까지는 안 돌지만 ①②는 동작 → 문항별 '작성 재료 키트'(어떤 경험을 어떤 각도로)를 뽑아준다. 그걸 들고 직접 쓰거나 이 프롬프트로 손쓰면 됨.
+
+**임베딩 업그레이드(선택):** 지금은 어휘 매칭 RAG. Gemini embedding / pgvector로 바꾸면 의미 검색이 된다 — `experiences.json` 구조는 그대로 두고 retrieve()만 교체.

@@ -117,9 +117,13 @@ neural-flow/
 ├── gmail_sensor.py                ← (선택) Gmail 마감 센서
 ├── radar.py                       ← ★ 기회·정보 레이더 (네이버+Threads → Gemini 큐레이션)
 ├── threads_source.py              ← (선택) Threads 공식 keyword_search (기술·DB 근원)
+├── coverletter.py                 ← ★ 멀티에이전트 RAG 자소서 엔진 (검색→3초안→통합→AI티 검열)
+├── experiences.json               ← 경험 자산 DB (RAG 검색 재료, 키워드 태깅)
+├── job_input.example.json         ← 자소서 엔진 입력 템플릿 (→ job_input.json 복사해 사용)
 ├── prompts/
 │   ├── mentor-prompt.md           ← 멘토링·추천 에이전트 프롬프트 (재사용)
 │   ├── daily-brief-prompt.md      ← 아침 브리핑 프롬프트
+│   ├── cover-letter-customizer.md ← 자소서 커스터마이저 프롬프트 + 엔진 사용법
 │   └── hermes-tracking.md         ← 헤르메스 양방향 추적 스킬/cron
 └── workflows/
     └── weekly-recommend.workflow.js  ← (선택) 주간 추천 워크플로우 스크립트

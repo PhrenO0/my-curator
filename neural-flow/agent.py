@@ -279,6 +279,14 @@ def run(mode="daily"):
         print("✅ pull(전체) 완료")
         return
 
+    if mode == "coverletter":                              # 멀티에이전트 RAG 자소서 엔진
+        try:
+            from coverletter import run as cl_run
+            cl_run()
+        except Exception as e:
+            print(f"[coverletter] 실패: {e}")
+        return
+
     if mode == "checkin":                                  # 저녁 양방향 체크인
         brief = think(state, today, deadlines, counts, weakest, "daily")
         text = build_checkin_text(today, brief)
