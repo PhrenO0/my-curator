@@ -5,10 +5,11 @@ on:
     - cron: '0 22 * * *'   # 매일 KST 07:00 — 데일리 브리핑
     - cron: '0 13 * * *'   # 매일 KST 22:00 — 저녁 양방향 체크인
     - cron: '0 11 * * 0'   # 일요일 KST 20:00 — 주간 추천+회고
+    - cron: '0 23 * * 3'   # 목요일 KST 08:00 — 기회·정보 레이더(Threads 포함)
   workflow_dispatch:
     inputs:
       mode:
-        description: 'daily | weekly | checkin'
+        description: 'daily | weekly | checkin | radar'
         required: false
         default: 'daily'
 
@@ -42,9 +43,17 @@ jobs:
           GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
           GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           SCHEDULE: ${{ github.event.schedule }}
           DISPATCH_MODE: ${{ github.event.inputs.mode }}
         run: |
+          if [ "$SCHEDULE" = "0 23 * * 3" ] || [ "$DISPATCH_MODE" = "radar" ]; then
+            echo "Running radar"
+            python neural-flow/radar.py
+            exit 0
+          fi
           if [ "$SCHEDULE" = "0 11 * * 0" ]; then
             export NEURAL_FLOW_MODE=weekly
           elif [ "$SCHEDULE" = "0 13 * * *" ]; then

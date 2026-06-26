@@ -114,6 +114,9 @@ neural-flow/
 ├── brief_email.py                 ← 브리핑 HTML 이메일 렌더링
 ├── notion_sync.py                 ← (선택) Notion 라이브 읽기/기록
 ├── tg.py                          ← (선택) 텔레그램 푸시 (아침 단 하나·저녁 체크인)
+├── gmail_sensor.py                ← (선택) Gmail 마감 센서
+├── radar.py                       ← ★ 기회·정보 레이더 (네이버+Threads → Gemini 큐레이션)
+├── threads_source.py              ← (선택) Threads 공식 keyword_search (기술·DB 근원)
 ├── prompts/
 │   ├── mentor-prompt.md           ← 멘토링·추천 에이전트 프롬프트 (재사용)
 │   ├── daily-brief-prompt.md      ← 아침 브리핑 프롬프트

@@ -33,6 +33,7 @@ next-env.d.ts
 
 # neural-flow generated previews
 neural-flow/brief_preview.html
+neural-flow/radar_preview.html
 
 # python
 __pycache__/

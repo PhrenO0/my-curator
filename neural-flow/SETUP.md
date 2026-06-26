@@ -76,7 +76,21 @@ GOOGLE_API_KEY=... SENDER_EMAIL=... SENDER_PASSWORD=... python neural-flow/agent
 
 ---
 
+## Lv.5 — 기회·정보 레이더 (Threads 포함)
+
+매주 목요일 아침, **기회(채용·공모전·앰버서더·지원금) + 기술·DB 최신정보**가 메일로 온다.
+
+1. **네이버 검색** (기회 수집) — `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET`. *curator가 이미 쓰는 키.*
+2. **Threads** (기술·DB 근원) — `THREADS_ACCESS_TOKEN`:
+   - Meta 개발자 → 앱 생성(Threads use case) → 토큰 발급(단기 1h → 장기 60일 교환). [문서](https://developers.facebook.com/docs/threads/get-started/)
+   - ⚠️ **타인의 공개글 키워드 검색은 `threads_keyword_search` 권한(App Review)이 필요.**
+     승인 전엔 본인(테스터) 글만 검색된다. → 본인/팔로우 기반으로 먼저 쓰고, 공개 검색이 필요하면 앱 심사 진행.
+3. 수동 실행: Actions → Run workflow → mode `radar`. (검색어는 `neural-flow/radar.py` 상단에서 수정)
+
+---
+
 ## cron 시간 메모
 - `0 22 * * *` (UTC) = **매일 07:00 KST** 데일리 브리핑
 - `0 13 * * *` (UTC) = **매일 22:00 KST** 저녁 양방향 체크인
 - `0 11 * * 0` (UTC) = **일요일 20:00 KST** 주간 추천+회고
+- `0 23 * * 3` (UTC) = **목요일 08:00 KST** 기회·정보 레이더(Threads)
