@@ -30,3 +30,10 @@ next-env.d.ts
 
 # vercel
 .vercel
+
+# neural-flow generated previews
+neural-flow/brief_preview.html
+
+# python
+__pycache__/
+*.pyc

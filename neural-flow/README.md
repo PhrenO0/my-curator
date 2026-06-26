@@ -105,14 +105,26 @@
 ```
 neural-flow/
 ├── README.md                      ← 이 문서 (운영 매뉴얼)
+├── ARCHITECTURE.md                ← 에이전트 루프 교육 ("어떤 파이프라인을 만들까")
+├── SETUP.md                       ← 에이전트 켜기 (시크릿/Actions, 5분)
 ├── config.json                    ← 노션/캘린더 ID·영역 정의
-├── AUTOMATION.md                  ← 아침 브리핑 자동화 옵션 + 한계
+├── AUTOMATION.md                  ← 자동화 옵션 + 한계
+├── agent.py                       ← ★ 멘토링 에이전트 본체 (SENSE→THINK→ACT)
+├── state.json                     ← 에이전트의 장기 기억 (비전·9영역·활동)
+├── brief_email.py                 ← 브리핑 HTML 이메일 렌더링
+├── notion_sync.py                 ← (선택) Notion 라이브 읽기/기록
 ├── prompts/
 │   ├── mentor-prompt.md           ← 멘토링·추천 에이전트 프롬프트 (재사용)
 │   └── daily-brief-prompt.md      ← 아침 브리핑 프롬프트
 └── workflows/
     └── weekly-recommend.workflow.js  ← (선택) 주간 추천 워크플로우 스크립트
+
+.github/workflows/neural-flow.yml  ← 데일리·위클리 cron (curator 와 동일 구조)
 ```
+
+> 🤖 **에이전트 파이프라인:** `agent.py` 는 준상의 `curator_bot.py` 와 똑같은
+> 구조(Python → Gemini → 이메일)다. 이미 있는 시크릿만으로 매일 07:00 브리핑이 온다.
+> 구조를 배우려면 `ARCHITECTURE.md`, 켜려면 `SETUP.md`.
 
 ---
 

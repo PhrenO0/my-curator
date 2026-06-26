@@ -1,0 +1,50 @@
+name: neural-flow mentoring agent
+
+on:
+  schedule:
+    - cron: '0 22 * * *'   # 매일 KST 07:00 — 데일리 브리핑
+    - cron: '0 11 * * 0'   # 일요일 KST 20:00 — 주간 추천+회고
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'daily | weekly'
+        required: false
+        default: 'daily'
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run neural-flow agent
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GEMINI_MODEL: gemini-2.5-flash
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SCHEDULE: ${{ github.event.schedule }}
+          DISPATCH_MODE: ${{ github.event.inputs.mode }}
+        run: |
+          if [ "$SCHEDULE" = "0 11 * * 0" ]; then
+            export NEURAL_FLOW_MODE=weekly
+          elif [ -n "$DISPATCH_MODE" ]; then
+            export NEURAL_FLOW_MODE="$DISPATCH_MODE"
+          else
+            export NEURAL_FLOW_MODE=daily
+          fi
+          echo "Running in $NEURAL_FLOW_MODE mode"
+          python neural-flow/agent.py
