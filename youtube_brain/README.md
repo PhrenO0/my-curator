@@ -98,15 +98,23 @@ youtube_brain/
 
 ---
 
+## 연동된 곳 (이미 동작)
+
+- **📊 대시보드** — `app/knowledge/page.tsx` (`/knowledge`). `knowledge.jsonl`을 읽어
+  카드·카테고리 필터로 보여준다. 홈(`/`) 상단 `📺 유튜브 지식` 버튼으로 이동.
+  (`next.config.ts`의 `outputFileTracingIncludes`로 Vercel 번들에 파일 포함)
+- **🤖 데일리 큐레이터 자동 적재** — `curator_bot.py`가 매일 큐레이션한 영상 중
+  유튜브 링크를 자동으로 `ingest`해 지식DB를 키운다. `curator.yml`이 `knowledge.jsonl`을 커밋.
+  끄려면 `YT_BRAIN_ARCHIVE=0`.
+
 ## 자동화 (GitHub Actions)
 
-`.github/workflows/youtube-brain.yml` — **Actions 탭에서 수동 실행(workflow_dispatch)**.
-`target`(링크/키워드)·`max`를 입력하면 수집 후 `knowledge.jsonl`을 커밋한다.
+- `.github/workflows/youtube-brain.yml` — **Actions 탭에서 수동 실행**. `target`(링크/키워드)·`max` 입력 → 수집 후 커밋.
+- `.github/workflows/curator.yml` — 매일 자동 실행 시 큐레이션 영상이 함께 적재된다.
 
 ---
 
 ## 다음 단계(확장 아이디어)
 
-- **대시보드 연동**: Next.js `app/`에 `/knowledge` 페이지를 만들어 `knowledge.jsonl`을 렌더.
-- **자동 수집**: `curator`가 매일 고른 영상을 자동으로 `ingest`해 지식DB를 키운다.
 - **주간 다이제스트**: 새로 쌓인 카드만 모아 이메일/노션으로.
+- **대시보드 검색창**: `/knowledge`에 의미검색 입력(서버 액션 + `ask`) 추가.
