@@ -2,6 +2,7 @@ google-api-python-client
 google-auth
 beautifulsoup4
 requests
+youtube-transcript-api
 python-dotenv
 yfinance
 openai
