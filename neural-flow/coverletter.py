@@ -4,10 +4,11 @@ neural-flow — 멀티에이전트 RAG 자소서 엔진
 '단일 LLM이 한 번에 쓰기'가 아니라, 2026 트렌드인 검색(RAG) + 멀티에이전트 구조.
 
 파이프라인 (각 단계가 하나의 '에이전트'):
-    1. RETRIEVE  — 공고 키워드로 경험 자산 DB(experiences.json)에서 최적 소재를 검색 (RAG)
+    1. RETRIEVE  — 공고로 경험 자산 DB(experiences.json)에서 최적 소재 검색 (RAG)
+                   · 기본: 어휘 매칭  · NF_EMBED=1: 임베딩 의미검색(코사인, 캐시)
     2. RESEARCH  — 기업 톤·인재상·핵심가치를 정리 (공고/메모 → 기업 언어)
     3. DRAFT     — 같은 문항을 3가지 각도로 초안 (문제정의형 / 성과·근거형 / 메시지·연출형)
-    4. SYNTHESIZE— 가장 강한 뼈대 1개로 통합하고 나머지의 좋은 줄을 접목
+    4. SYNTHESIZE— master.json의 검증된 문항 답변을 '기본 뼈대'로, 회사 언어로 변주·통합
     5. DE-AI     — AI 티(상투어·과한 em-dash·'A 아니라 B' 반복·외부사례)를 검열·교정
 
 핵심 원칙(cover-letter-customizer.md와 동일):
@@ -22,7 +23,8 @@ neural-flow — 멀티에이전트 RAG 자소서 엔진
     NEURAL_FLOW_MODE=coverletter python neural-flow/agent.py
 
 입력(job_input.json): job_input.example.json 참고.
-환경: GOOGLE_API_KEY(없어도 '작성 재료 키트'까지는 동작), SENDER_EMAIL/PASSWORD(있으면 메일).
+환경: GOOGLE_API_KEY(없어도 '작성 재료 키트'+마스터 뼈대까지 동작), SENDER_EMAIL/PASSWORD(메일).
+선택: NF_EMBED=1(의미검색), GEMINI_EMBED_MODEL(기본 models/text-embedding-004).
 """
 
 import os
@@ -36,6 +38,7 @@ from email.mime.text import MIMEText
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXP_PATH = os.path.join(HERE, "experiences.json")
+MASTER_PATH = os.path.join(HERE, "master.json")
 KST = timezone(timedelta(hours=9))
 
 # de-AI: 보이면 무조건 다시 써야 하는 상투어
@@ -76,6 +79,14 @@ def load_experiences():
         return json.load(f)["experiences"]
 
 
+def load_master():
+    """마스터 자소서(문항 유형별 완성 답변). 엔진이 '기본 뼈대'로 끌어다 변주한다."""
+    if not os.path.exists(MASTER_PATH):
+        return {}
+    with open(MASTER_PATH, "r", encoding="utf-8") as f:
+        return json.load(f).get("answers", {})
+
+
 # ── 1. RETRIEVE (RAG) ─────────────────────────────────────────────────────────
 def tokenize(text):
     """한글/영문 토큰화(소문자)."""
@@ -83,6 +94,19 @@ def tokenize(text):
 
 
 def retrieve(text, exps, k=3, serve_tag=None):
+    """검색 디스패처: NF_EMBED=1 이고 키가 있으면 의미검색(임베딩), 아니면 어휘 매칭.
+    의미검색이 어떤 이유로든 실패하면 조용히 어휘 매칭으로 폴백한다."""
+    if os.environ.get("NF_EMBED", "").lower() in ("1", "true", "yes"):
+        emb = _get_embedder()
+        if emb is not None:
+            try:
+                return retrieve_semantic(text, exps, k, serve_tag, emb)
+            except Exception as ex:
+                print(f"[retrieve] 의미검색 실패 → 어휘 폴백: {ex}")
+    return retrieve_lexical(text, exps, k, serve_tag)
+
+
+def retrieve_lexical(text, exps, k=3, serve_tag=None):
     """공고+문항 텍스트로 경험을 점수화해 top-k 반환 — 어휘 매칭 기반 RAG.
 
     점수 = 키워드 겹침(×2) + 본문/제목 단어 겹침(×1) + (문항 유형 매칭 보너스).
@@ -98,6 +122,89 @@ def retrieve(text, exps, k=3, serve_tag=None):
             score += 3
         if score > 0:
             scored.append((score, e))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [e for _, e in scored[:k]]
+
+
+# ── 1b. RETRIEVE (의미검색 / 임베딩) ──────────────────────────────────────────
+EMB_CACHE = os.path.join(HERE, "embeddings_cache.json")
+
+
+def _get_embedder():
+    key = os.environ.get("GOOGLE_API_KEY")
+    if not key:
+        return None
+    try:
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        return GoogleGenerativeAIEmbeddings(
+            model=os.environ.get("GEMINI_EMBED_MODEL", "models/text-embedding-004"),
+            google_api_key=key,
+        )
+    except Exception as e:
+        print(f"[embed] 임베더 로드 실패: {e}")
+        return None
+
+
+def _exp_text(e):
+    return " ".join([e.get("title", ""), e.get("one_liner", ""),
+                     " ".join(e.get("keywords", [])), e.get("story", "")])
+
+
+def _cosine(a, b):
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _emb_cache_load():
+    if os.path.exists(EMB_CACHE):
+        try:
+            with open(EMB_CACHE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def embed_experiences(exps, embedder):
+    """경험 임베딩을 캐시. 텍스트가 바뀐 항목만 재임베딩(키별로 md5)."""
+    import hashlib
+    cache = _emb_cache_load()
+    vecs, todo = {}, []
+    for e in exps:
+        h = hashlib.md5(_exp_text(e).encode("utf-8")).hexdigest()
+        key = f"{e['id']}:{h}"
+        if key in cache:
+            vecs[e["id"]] = cache[key]
+        else:
+            todo.append((e, key))
+    if todo:
+        new = embedder.embed_documents([_exp_text(e) for e, _ in todo])
+        for (e, key), v in zip(todo, new):
+            cache[key], vecs[e["id"]] = v, v
+        try:
+            with open(EMB_CACHE, "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+        except Exception as e:
+            print(f"[embed] 캐시 저장 실패: {e}")
+    return vecs
+
+
+def retrieve_semantic(text, exps, k, serve_tag, embedder):
+    """질의 임베딩 vs 경험 임베딩 코사인 유사도로 top-k. 문항 유형은 소폭 가산."""
+    vecs = embed_experiences(exps, embedder)
+    qv = embedder.embed_query(text)
+    scored = []
+    for e in exps:
+        v = vecs.get(e["id"])
+        if not v:
+            continue
+        s = _cosine(qv, v)
+        if serve_tag and serve_tag in e.get("serves", []):
+            s += 0.05
+        scored.append((s, e))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [e for _, e in scored[:k]]
 
@@ -195,22 +302,28 @@ def draft(question, char_limit, exps, ctx, angle, llm):
     return _ask(llm, prompt)
 
 
-def synthesize(question, char_limit, drafts, ctx, llm):
-    """3초안을 한 개의 강한 뼈대로 통합."""
+def synthesize(question, char_limit, drafts, ctx, llm, master_base=None):
+    """초안들을 한 개의 강한 뼈대로 통합. master_base가 있으면 그것을 기본 골격으로 변주."""
     joined = "\n\n".join(f"[초안 {i+1}]\n{d}" for i, d in enumerate(drafts) if d)
-    prompt = f"""아래 3개 초안을 하나로 통합하라. 가장 설득력 있는 뼈대 1개를 고르고,
-나머지 초안에서 더 좋은 문장·근거만 접목해 완성도를 높여라. 짜깁기 티가 나면 안 된다.
+    master_block = ""
+    if master_base:
+        master_block = (
+            f"\n[마스터 자소서 — 이 문항의 검증된 기본 뼈대. 골격·논리·숫자는 살리고, "
+            f"이 회사의 언어와 공고 맥락으로 변주하라. 경험·숫자 불변]\n{master_base}\n"
+        )
+    prompt = f"""아래 재료로 이 문항의 최종 본문을 완성하라.
+{('마스터 뼈대를 기본 골격으로 삼고, 3초안에서 이 회사에 더 맞는 표현·각도만 접목하라.' if master_base else '가장 설득력 있는 초안 1개를 뼈대로 고르고, 나머지의 더 좋은 문장만 접목하라.')}
+짜깁기 티가 나면 안 된다.
 
 [문항] {question}
 [글자수] 약 {char_limit}자(±10%) — 넘치면 가장 약한 문장부터 줄여라.
 [기업 언어] {json.dumps(ctx.get('keywords', []), ensure_ascii=False)}
-
-{joined}
+{master_block}{joined}
 
 {VOICE}
 완성된 최종 본문만 출력."""
     if llm is None:
-        return drafts[0] if drafts else ""
+        return master_base or (drafts[0] if drafts else "")
     return _ask(llm, prompt)
 
 
@@ -230,7 +343,10 @@ def de_ai_scan(text):
     for g in GENERIC_REFS:
         if g in text:
             issues.append(f"외부 사례 '{g}' 등장 → 본인 경험으로 대체 검토")
-    if re.match(r"^\s*저는\b", text) and "생각" not in text[:40]:
+    # 첫 문장이 '저는'으로 시작하되 주장(생각/믿/봅니다)이 없으면 밋밋 → 후킹 검토.
+    # 준상의 정통 문체 "저는 ~라고 생각합니다/믿습니다/봅니다"는 오탐하지 않는다.
+    first_sent = re.split(r"(?<=다)\.\s|\n", text.strip(), 1)[0]
+    if first_sent.startswith("저는") and not re.search(r"생각|믿|봅니다|여깁니다|중요하다", first_sent):
         issues.append("첫 문장 '저는'으로 밋밋하게 시작 — 장면/주장으로 후킹 검토")
     # 느낌표·버즈워드 과다
     if text.count("!") >= 2:
@@ -259,11 +375,12 @@ def de_ai_rewrite(text, issues, ctx, llm):
 
 
 # ── 오케스트레이션 ─────────────────────────────────────────────────────────────
-def answer_question(question, char_limit, exps, ctx, llm):
+def answer_question(question, char_limit, exps, ctx, llm, master=None):
     tag = question_tag(question)
     picked = retrieve(question + " " + ctx.get("tone", ""), exps, k=3, serve_tag=tag)
+    master_base = (master or {}).get(tag) if tag else None
     drafts = [draft(question, char_limit, picked, ctx, a, llm) for a in ANGLES]
-    merged = synthesize(question, char_limit, drafts, ctx, llm)
+    merged = synthesize(question, char_limit, drafts, ctx, llm, master_base=master_base)
     issues = de_ai_scan(merged or "")
     final = de_ai_rewrite(merged, issues, ctx, llm) if merged else ""
     issues_after = de_ai_scan(final or "")
@@ -271,6 +388,7 @@ def answer_question(question, char_limit, exps, ctx, llm):
         "question": question,
         "tag": tag,
         "used": [e["title"] for e in picked],
+        "master_base": bool(master_base),
         "drafts_n": sum(1 for d in drafts if d),
         "final": final or "",
         "issues_before": issues,
@@ -301,8 +419,9 @@ def render_md(job, ctx, results, has_llm):
         "",
     ]
     for i, r in enumerate(results, 1):
+        base_tag = f"  ·  *마스터 뼈대({r['tag']}) 변주*" if r.get("master_base") else ""
         lines += [f"## {i}. {r['question']}",
-                  f"*검색된 경험(RAG): {', '.join(r['used']) or '없음'}*  ·  *초안 {r['drafts_n']}개 통합*", ""]
+                  f"*검색된 경험(RAG): {', '.join(r['used']) or '없음'}*  ·  *초안 {r['drafts_n']}개 통합*{base_tag}", ""]
         if has_llm and r["final"]:
             lines += [r["final"], ""]
             if r["issues_after"]:
@@ -353,15 +472,17 @@ def run(job_path=None):
     print("✍️ neural-flow 자소서 엔진 시작")
     job = load_job(job_path)
     exps = load_experiences()
+    master = load_master()
     llm = get_llm()
     has_llm = llm is not None
-    print(f"[1·RETRIEVE] 경험 자산 {len(exps)}개 로드 · [2·RESEARCH] 기업 분석 "
-          f"({'Gemini' if has_llm else '폴백'})")
+    print(f"[1·RETRIEVE] 경험 자산 {len(exps)}개 + 마스터 {len(master)}문항 로드 · "
+          f"[2·RESEARCH] 기업 분석 ({'Gemini' if has_llm else '폴백'})")
     ctx = research_company(job, llm)
     results = []
     for q in job.get("questions", []):
-        r = answer_question(q, job.get("char_limit", 1000), exps, ctx, llm)
-        print(f"  - '{q[:18]}…' → 검색 {len(r['used'])} · 초안 {r['drafts_n']} · "
+        r = answer_question(q, job.get("char_limit", 1000), exps, ctx, llm, master=master)
+        base = "+마스터" if r["master_base"] else ""
+        print(f"  - '{q[:18]}…' → 검색 {len(r['used'])}{base} · 초안 {r['drafts_n']} · "
               f"검열 {len(r['issues_before'])}→{len(r['issues_after'])}")
         results.append(r)
 

@@ -62,8 +62,8 @@
 2. `python neural-flow/coverletter.py` (또는 `NEURAL_FLOW_MODE=coverletter python neural-flow/agent.py`).
 3. 결과: `coverletter_output.md` + (메일 설정 시) 메일.
 
-**재료 DB:** `experiences.json` (경험 자산 10개, 키워드 태깅). 경험을 추가하려면 keywords를 채워 넣기만 하면 검색에 잡힌다. 숫자·근거(`proof`)는 **절대 변경 금지**.
+**재료 DB:** `experiences.json` (경험 자산 10개, 키워드 태깅) + `master.json` (마스터 6문항). 문항 유형이 맞으면 마스터 답변을 '기본 뼈대'로 삼아 회사 언어로 변주한다. 경험을 추가하려면 keywords만 채우면 검색에 잡힘. 숫자·근거(`proof`)는 **절대 변경 금지**.
 
-**GOOGLE_API_KEY 없을 때:** ⑤까지는 안 돌지만 ①②는 동작 → 문항별 '작성 재료 키트'(어떤 경험을 어떤 각도로)를 뽑아준다. 그걸 들고 직접 쓰거나 이 프롬프트로 손쓰면 됨.
+**GOOGLE_API_KEY 없을 때:** ③④⑤는 안 돌지만 ①②는 동작 → 문항별 '작성 재료 키트' + 마스터 뼈대를 뽑아준다. 그걸 들고 직접 쓰거나 이 프롬프트로 손쓰면 됨.
 
-**임베딩 업그레이드(선택):** 지금은 어휘 매칭 RAG. Gemini embedding / pgvector로 바꾸면 의미 검색이 된다 — `experiences.json` 구조는 그대로 두고 retrieve()만 교체.
+**의미검색(구현됨):** 기본은 어휘 매칭. `NF_EMBED=1` 주면 Gemini 임베딩(text-embedding-004) 코사인 의미검색으로 동작하고, 경험 임베딩은 `embeddings_cache.json`에 캐시(텍스트 바뀐 항목만 재계산). 키 없으면 자동으로 어휘 매칭 폴백.

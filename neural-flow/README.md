@@ -119,6 +119,7 @@ neural-flow/
 ├── threads_source.py              ← (선택) Threads 공식 keyword_search (기술·DB 근원)
 ├── coverletter.py                 ← ★ 멀티에이전트 RAG 자소서 엔진 (검색→3초안→통합→AI티 검열)
 ├── experiences.json               ← 경험 자산 DB (RAG 검색 재료, 키워드 태깅)
+├── master.json                    ← 마스터 자소서 6문항 (엔진이 '기본 뼈대'로 변주)
 ├── job_input.example.json         ← 자소서 엔진 입력 템플릿 (→ job_input.json 복사해 사용)
 ├── prompts/
 │   ├── mentor-prompt.md           ← 멘토링·추천 에이전트 프롬프트 (재사용)
