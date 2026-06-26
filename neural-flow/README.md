@@ -125,6 +125,7 @@ neural-flow/
 │   ├── mentor-prompt.md           ← 멘토링·추천 에이전트 프롬프트 (재사용)
 │   ├── daily-brief-prompt.md      ← 아침 브리핑 프롬프트
 │   ├── cover-letter-customizer.md ← 자소서 커스터마이저 프롬프트 + 엔진 사용법
+│   ├── decision-journal.md        ← 결정 일지 Pre-mortem 프롬프트(과확장 처방)
 │   └── hermes-tracking.md         ← 헤르메스 양방향 추적 스킬/cron
 └── workflows/
     └── weekly-recommend.workflow.js  ← (선택) 주간 추천 워크플로우 스크립트

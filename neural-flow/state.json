@@ -140,7 +140,9 @@
     "hub_page_id": "38bb9019-0357-819c-aad5-f4877ff8a797",
     "roadmap_page_id": "38bb9019-0357-8146-8dfe-ef51f6032bd7",
     "activity_database_id": "c8663e52-1a56-4666-bc34-9bfbb75474d2",
-    "activity_data_source": "bee4fa18-3021-4ffd-9e89-0f2a73dbceff"
+    "activity_data_source": "bee4fa18-3021-4ffd-9e89-0f2a73dbceff",
+    "decision_journal_db": "7744b22f-86a7-47bb-a1f7-fc4c385e2a30",
+    "decision_journal_data_source": "845a70ea-f88b-45eb-b98e-be6710b4ef90"
   },
   "calendar": {"primary": "jun1234sang@gmail.com"}
 }
