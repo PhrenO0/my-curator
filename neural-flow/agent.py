@@ -52,6 +52,16 @@ def load_state():
                 print(f"[SENSE] Notion 라이브 활동 {len(live)}개 로드")
         except Exception as e:
             print(f"[SENSE] Notion 라이브 로드 실패(스냅샷 사용): {e}")
+    # Gmail 센서: 메일에서 면접·마감 신호를 챙길 것으로
+    flags = []
+    try:
+        from gmail_sensor import pull_inbox_flags
+        flags = pull_inbox_flags()
+    except Exception as e:
+        print(f"[SENSE] Gmail 센서 스킵: {e}")
+    state["inbox_flags"] = flags
+    if flags:
+        print(f"[SENSE] 메일 플래그 {len(flags)}건")
     return state
 
 
@@ -121,6 +131,7 @@ def build_prompt(state, today, deadlines, balance_counts, weakest, mode):
 [마감 카운트다운] {json.dumps(deadlines, ensure_ascii=False)}
 [9개 영역 활동 분포] {json.dumps(balance_counts, ensure_ascii=False)}
 [가장 비어있는 영역] {weakest}
+[메일에서 챙길 것] {json.dumps(state.get("inbox_flags", []), ensure_ascii=False)}
 [미완료 활동] {json.dumps(activities, ensure_ascii=False)}
 {extra}
 원칙: 과확장 금지. '오늘의 단 하나'는 무조건 1개. 마감 임박 > 고가치 > 영성 순. 신앙은 진지하게.

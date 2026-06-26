@@ -49,6 +49,15 @@ GOOGLE_API_KEY=... SENDER_EMAIL=... SENDER_PASSWORD=... python neural-flow/agent
 
 ---
 
+## Lv.3.5 — Gmail 마감 센서 (선택)
+
+메일에서 면접·마감·합격을 자동으로 브리핑 '📨 챙길 것'에 띄운다. 읽기 전용 OAuth 필요:
+1. Google Cloud Console → OAuth 클라이언트(데스크톱) → `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET`.
+2. `gmail.readonly` 스코프 1회 동의 → `GMAIL_REFRESH_TOKEN` 발급 (OAuth Playground 등).
+3. GitHub Secrets 3개 추가. → 없으면 센서는 조용히 건너뛴다(에이전트 정상 동작).
+
+---
+
 ## Lv.4 — 헤르메스 양방향 추적 (텔레그램, "그거 했어?")
 
 진짜 '철저한 관리'. 매일 저녁 에이전트가 먼저 **"오늘의 단 하나 했어?"** 라고 묻고, 답을 노션에 기록한다.

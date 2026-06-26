@@ -29,6 +29,17 @@ def _balance_bar(counts):
     return cells
 
 
+def _inbox(state):
+    flags = state.get("inbox_flags") or []
+    if not flags:
+        return ""
+    items = "".join(f"<li style='margin:4px 0'>{f}</li>" for f in flags)
+    return (
+        "<h2 style='color:#34495e;margin-top:28px'>📨 메일에서 챙길 것</h2>"
+        f"<ul style='line-height:1.5;color:#444'>{items}</ul>"
+    )
+
+
 def _reco(brief):
     recos = brief.get("recommendations") or []
     if not recos:
@@ -66,6 +77,7 @@ def render(state, today, brief, deadlines, counts, mode):
 
   <h2 style="color:#34495e;margin-top:28px">⏳ 마감 카운트다운</h2>
   {_deadline_rows(deadlines)}
+  {_inbox(state)}
 
   <h2 style="color:#34495e;margin-top:28px">🌳 9개 영역 균형</h2>
   <div>{_balance_bar(counts)}</div>
