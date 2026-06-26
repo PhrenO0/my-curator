@@ -117,6 +117,7 @@ neural-flow/
 ├── gmail_sensor.py                ← (선택) Gmail 마감 센서
 ├── radar.py                       ← ★ 기회·정보 레이더 (네이버+Threads → Gemini 큐레이션)
 ├── threads_source.py              ← (선택) Threads 공식 keyword_search (기술·DB 근원)
+├── build_static.py                ← 자체완결 HTML 대시보드 생성(Vercel 없이 폰/브라우저로 열기)
 ├── coverletter.py                 ← ★ 멀티에이전트 RAG 자소서 엔진 (검색→3초안→통합→AI티 검열)
 ├── experiences.json               ← 경험 자산 DB (RAG 검색 재료, 키워드 태깅)
 ├── master.json                    ← 마스터 자소서 6문항 (엔진이 '기본 뼈대'로 변주)

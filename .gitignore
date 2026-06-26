@@ -37,6 +37,7 @@ neural-flow/radar_preview.html
 neural-flow/coverletter_output.md
 neural-flow/job_input.json
 neural-flow/embeddings_cache.json
+neural-flow/dashboard.html
 
 # python
 __pycache__/
