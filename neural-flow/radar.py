@@ -5,12 +5,13 @@ neural-flow 기회·정보 레이더
 
 소스:
   - 한국 기회(채용·공모전·앰버서더·지원금): Naver 검색 API
-  - 기술·DB 최신정보: Threads 공식 keyword_search (threads_source)
+  - 기술·DB 최신정보(1차 신호): Threads + GitHub Trending + Hacker News + RSS
 처리: Gemini가 준상 프로필에 맞춰 큐레이션 → 이메일.
 
 실행:  python neural-flow/radar.py
 환경:  NAVER_CLIENT_ID/SECRET, GOOGLE_API_KEY, SENDER_EMAIL/PASSWORD
-선택:  THREADS_ACCESS_TOKEN(기술 레이더), RECEIVER_EMAIL, GEMINI_MODEL
+선택:  THREADS_ACCESS_TOKEN(Threads 레이더), RECEIVER_EMAIL, GEMINI_MODEL
+       GitHub/HN/RSS는 키 없이 동작(공개 API/HTML). 실패하면 조용히 스킵.
 """
 
 import os
@@ -35,6 +36,13 @@ OPP_QUERIES = [
 ]
 # 'Threads = 기술/DB 최신정보의 근원'
 TECH_KEYWORDS = ["vector database", "RAG", "AI agent", "LLM", "데이터베이스", "프롬프트 엔지니어링"]
+# HN 필터용 영문 키워드(제목 매칭)
+TECH_KEYWORDS_EN = ["ai", "llm", "rag", "agent", "vector", "database", "product", "prompt"]
+# RSS 1차 신호 소스 (이름, URL). 안정적인 피드 위주 — 여기에 추가만 하면 레이더에 잡힌다.
+RSS_FEEDS = [
+    ("GitHub Blog", "https://github.blog/feed/"),
+    ("Smashing", "https://www.smashingmagazine.com/feed/"),
+]
 
 
 # ── 수집 ──────────────────────────────────────────────────────────────────────
@@ -68,6 +76,82 @@ def naver_search(query, kind="news", display=5):
         return []
 
 
+# ── 기술·DB 1차 신호 (Threads 외) ────────────────────────────────────────────
+def github_trending(limit=5):
+    """GitHub Trending(daily)을 HTML 파싱. 키 불필요."""
+    try:
+        from bs4 import BeautifulSoup
+        r = requests.get(
+            "https://github.com/trending?since=daily",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=15,
+        )
+        soup = BeautifulSoup(r.text, "html.parser")
+        out = []
+        for art in soup.select("article.Box-row")[:limit]:
+            a = art.select_one("h2 a")
+            if not a:
+                continue
+            repo = " ".join(a.get_text().split())
+            desc_el = art.select_one("p")
+            desc = desc_el.get_text(strip=True) if desc_el else ""
+            out.append({"text": f"[GitHub Trending] {repo} — {desc}",
+                        "username": "github/trending",
+                        "link": "https://github.com" + a.get("href", "")})
+        return out
+    except Exception as e:
+        print(f"[radar] GitHub trending 스킵: {e}")
+        return []
+
+
+def hackernews_top(keywords, limit=4, scan=30):
+    """Hacker News 공식 API에서 상위글 중 키워드 매칭 제목만. 키 불필요."""
+    try:
+        ids = requests.get(
+            "https://hacker-news.firebaseio.com/v0/topstories.json", timeout=15
+        ).json()[:scan]
+        out = []
+        for i in ids:
+            if len(out) >= limit:
+                break
+            it = requests.get(
+                f"https://hacker-news.firebaseio.com/v0/item/{i}.json", timeout=10
+            ).json() or {}
+            title = it.get("title", "")
+            if not title:
+                continue
+            if keywords and not any(k in title.lower() for k in keywords):
+                continue
+            out.append({"text": f"[HN] {title}", "username": "news.ycombinator",
+                        "link": it.get("url") or f"https://news.ycombinator.com/item?id={i}"})
+        return out
+    except Exception as e:
+        print(f"[radar] HN 스킵: {e}")
+        return []
+
+
+def rss_pull(feeds, per=2):
+    """RSS 피드에서 최신 항목. 표준 xml.etree로 파싱(추가 의존성 없음)."""
+    import xml.etree.ElementTree as ET
+    out = []
+    for name, url in feeds:
+        try:
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            root = ET.fromstring(r.content)
+            for it in root.findall(".//item")[:per]:
+                title = (it.findtext("title") or "").strip()
+                link = (it.findtext("link") or "").strip()
+                if title:
+                    out.append({"text": f"[{name}] {title}", "username": name, "link": link})
+        except Exception as e:
+            print(f"[radar] RSS 스킵({name}): {e}")
+    return out
+
+
+def tech_signals():
+    """GitHub·HN·RSS 1차 신호를 Threads와 같은 형태로 합친다."""
+    return github_trending(5) + hackernews_top(TECH_KEYWORDS_EN, 4) + rss_pull(RSS_FEEDS, 2)
+
+
 def collect():
     opps = []
     for q in OPP_QUERIES:
@@ -78,6 +162,7 @@ def collect():
     except Exception as e:
         print(f"[radar] Threads 스킵: {e}")
         threads = []
+    threads += tech_signals()   # GitHub·HN·RSS 추가 (정보 파이프 고도화)
     return opps, threads
 
 
@@ -115,8 +200,8 @@ def curate(opps, threads):
 [기회 원본 — 채용·공모전·앰버서더·지원금]
 {json.dumps(opps[:30], ensure_ascii=False)[:6000]}
 
-[Threads 기술·DB 최신글]
-{json.dumps(threads[:20], ensure_ascii=False)[:4000]}
+[기술·DB 최신(Threads·GitHub Trending·Hacker News·RSS)]
+{json.dumps(threads[:24], ensure_ascii=False)[:5000]}
 
 JSON만 출력(코드펜스 금지):
 {{"opportunities":[{{"title":"","why":"준상에게 왜 중요한지 한 줄","link":""}}],
