@@ -1,0 +1,50 @@
+{
+  "system": "neural-flow",
+  "version": 1,
+  "created": "2026-06-26",
+  "owner": "준상 오 (junsang)",
+  "userEmail": "jun1234sang@gmail.com",
+  "timezone": "Asia/Seoul",
+  "notion": {
+    "workspace": "준상 오의 Notion",
+    "hub_page_id": "38bb9019-0357-819c-aad5-f4877ff8a797",
+    "hub_url": "https://app.notion.com/p/38bb90190357819caad5f4877ff8a797",
+    "activity_database_id": "c8663e52-1a56-4666-bc34-9bfbb75474d2",
+    "activity_data_source": "collection://bee4fa18-3021-4ffd-9e89-0f2a73dbceff",
+    "views": {
+      "calendar": "view://38bb9019-0357-81c3-b86b-000c1fc3c3fb",
+      "status_board": "view://38bb9019-0357-817a-9975-000c21990dfe"
+    },
+    "parent_life_page": {
+      "title": "나의 삶과 정의란 무엇인가",
+      "id": "2e354ca7-edf7-41d1-891f-026c3089434c"
+    },
+    "vision_source_pages": {
+      "Vision&Present": "cbc71d07-cc5a-4f99-a63e-07870bedede3",
+      "삶의 프리셋": "f4937cf7-78e9-41c6-a52a-a0dde1868e8a",
+      "커리어 전략 마스터플랜": "374b9019-0357-8184-a34d-eabf51306e6b",
+      "비전과 전략": "a0da5f46-8530-4ec2-8425-5099dc1e5c7a",
+      "연간 목표": "ee99424f-8693-438c-b7d1-3e16617e310a"
+    }
+  },
+  "calendar": {
+    "primary": "jun1234sang@gmail.com",
+    "color_map": {
+      "커리어·취업": "9",
+      "창업·경제자유": "6",
+      "영성·거룩": "3",
+      "건강(신체·정신)": "2",
+      "성장·집중력": "5",
+      "생활루틴": "8"
+    }
+  },
+  "domains": [
+    { "name": "💼 커리어·취업", "sub": ["자소서", "포트폴리오", "지원·면접", "커피챗"] },
+    { "name": "🚀 창업·경제자유", "sub": ["사이드프로젝트", "수익화", "투자·자산", "시장리서치"] },
+    { "name": "✝️ 영성·거룩", "sub": ["기도·QT", "말씀", "죄끊기·회개", "예배·공동체"] },
+    { "name": "🫀 건강(신체·정신)", "sub": ["운동", "수면", "식사", "정서안정", "도파민디톡스"] },
+    { "name": "🧠 성장·집중력", "sub": ["학습", "독서", "딥워크", "회고"] },
+    { "name": "🔁 생활루틴", "sub": ["아침루틴", "저녁루틴", "정리정돈"] }
+  ],
+  "status_flow": ["제안됨", "승인됨", "예정됨", "진행중", "완료", "보류"]
+}
