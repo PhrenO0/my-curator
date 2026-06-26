@@ -201,6 +201,46 @@ def maybe_write_back(state, today, brief):
         print(f"[ACT] Notion 기록 실패: {e}")
 
 
+def send_telegram(text):
+    """있으면 텔레그램으로도 보낸다 (헤르메스/봇 채널)."""
+    try:
+        from tg import send_message
+        if send_message(text):
+            print("[ACT] 텔레그램 발송")
+    except Exception as e:
+        print(f"[ACT] 텔레그램 스킵: {e}")
+
+
+def _wd(today):
+    return ["월", "화", "수", "목", "금", "토", "일"][today.weekday()]
+
+
+def build_text(today, brief, deadlines):
+    """데일리 브리핑의 텔레그램용 짧은 버전."""
+    dl = ""
+    if deadlines:
+        d = deadlines[0]
+        tag = "오늘" if d["d"] == 0 else f"D-{d['d']}"
+        dl = f"\n⏳ {tag} {d['title']}"
+    return (
+        f"🌊 <b>neural-flow · {today.strftime('%m/%d')}({_wd(today)})</b>\n\n"
+        f"☀️ <b>오늘의 단 하나</b>\n→ {brief.get('one_thing','')}\n"
+        f"<i>{brief.get('one_thing_why','')}</i>{dl}\n\n"
+        f"✝️ {brief.get('holiness_line','')}"
+    )
+
+
+def build_checkin_text(today, brief):
+    """저녁 체크인(양방향)의 텔레그램용 메시지."""
+    return (
+        f"🌙 <b>저녁 체크인 · {today.strftime('%m/%d')}({_wd(today)})</b>\n\n"
+        f"오늘의 단 하나였어:\n“{brief.get('one_thing','')}”\n\n"
+        f"했어? 👉 했으면 ✅<b>완료</b>, 못 했으면 내일로 옮기자.\n"
+        f"(헤르메스에게 '했어/못했어'로 답하면 노션에 자동 기록)\n\n"
+        f"✝️ {brief.get('holiness_line','')}"
+    )
+
+
 # ── main ────────────────────────────────────────────────────────────────────
 def run(mode="daily"):
     print(f"🌊 neural-flow agent — {mode} 모드 시작")
@@ -208,11 +248,22 @@ def run(mode="daily"):
     today = kst_today()
     deadlines = compute_deadlines(state, today)
     counts, weakest = compute_balance(state)
+
+    if mode == "checkin":                                  # 저녁 양방향 체크인
+        brief = think(state, today, deadlines, counts, weakest, "daily")
+        text = build_checkin_text(today, brief)
+        send_telegram(text)
+        send_email(f"🌙 오늘의 단 하나 했어? — {brief.get('one_thing','')[:24]}",
+                    f"<div style='font-family:sans-serif;font-size:1.05em'>{text.replace(chr(10), '<br>')}</div>")
+        print("✅ 체크인 완료")
+        return
+
     brief = think(state, today, deadlines, counts, weakest, mode)   # THINK
     html = render_html(state, today, brief, deadlines, counts, mode)
     subject = f"🌊 neural-flow · {today.strftime('%m/%d')} 오늘의 단 하나: {brief.get('one_thing','')[:30]}"
-    send_email(subject, html)                              # ACT
-    maybe_write_back(state, today, brief)                  # ACT (선택)
+    send_email(subject, html)                              # ACT (이메일)
+    send_telegram(build_text(today, brief, deadlines))     # ACT (텔레그램)
+    maybe_write_back(state, today, brief)                  # ACT (Notion)
     print("✅ 완료")
 
 

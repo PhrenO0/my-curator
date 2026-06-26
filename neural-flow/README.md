@@ -113,9 +113,11 @@ neural-flow/
 ├── state.json                     ← 에이전트의 장기 기억 (비전·9영역·활동)
 ├── brief_email.py                 ← 브리핑 HTML 이메일 렌더링
 ├── notion_sync.py                 ← (선택) Notion 라이브 읽기/기록
+├── tg.py                          ← (선택) 텔레그램 푸시 (아침 단 하나·저녁 체크인)
 ├── prompts/
 │   ├── mentor-prompt.md           ← 멘토링·추천 에이전트 프롬프트 (재사용)
-│   └── daily-brief-prompt.md      ← 아침 브리핑 프롬프트
+│   ├── daily-brief-prompt.md      ← 아침 브리핑 프롬프트
+│   └── hermes-tracking.md         ← 헤르메스 양방향 추적 스킬/cron
 └── workflows/
     └── weekly-recommend.workflow.js  ← (선택) 주간 추천 워크플로우 스크립트
 

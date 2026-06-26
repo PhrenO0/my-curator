@@ -49,6 +49,25 @@ GOOGLE_API_KEY=... SENDER_EMAIL=... SENDER_PASSWORD=... python neural-flow/agent
 
 ---
 
+## Lv.4 — 헤르메스 양방향 추적 (텔레그램, "그거 했어?")
+
+진짜 '철저한 관리'. 매일 저녁 에이전트가 먼저 **"오늘의 단 하나 했어?"** 라고 묻고, 답을 노션에 기록한다.
+
+**방법 A — 텔레그램 봇 푸시 (지금 코드로 됨):**
+1. 텔레그램 `@BotFather` → `/newbot` → `TELEGRAM_BOT_TOKEN` 받기.
+2. 만든 봇과 대화 시작 후 `@userinfobot` 에게 말 걸어 내 chat id 확인 → `TELEGRAM_CHAT_ID`.
+3. GitHub Secrets 에 둘 다 추가.
+→ 매일 07:00 '단 하나' / 22:00 '했어?' 가 텔레그램으로 온다 (`tg.py`).
+
+**방법 B — 헤르메스 스킬/cron (대화형 기록까지):**
+`prompts/hermes-tracking.md` 의 cron 3개(아침·저녁·주간)를 헤르메스에 등록.
+헤르메스가 너의 '했어/못했어' 답을 받아 **노션 상태를 자동 갱신**한다 → REMEMBER 루프 완성.
+
+> 푸시만 = A. 받아서 기록까지 = B(헤르메스). 같이 써도 된다.
+
+---
+
 ## cron 시간 메모
 - `0 22 * * *` (UTC) = **매일 07:00 KST** 데일리 브리핑
+- `0 13 * * *` (UTC) = **매일 22:00 KST** 저녁 양방향 체크인
 - `0 11 * * 0` (UTC) = **일요일 20:00 KST** 주간 추천+회고

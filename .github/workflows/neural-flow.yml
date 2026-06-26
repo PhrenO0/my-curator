@@ -3,11 +3,12 @@ name: neural-flow mentoring agent
 on:
   schedule:
     - cron: '0 22 * * *'   # 매일 KST 07:00 — 데일리 브리핑
+    - cron: '0 13 * * *'   # 매일 KST 22:00 — 저녁 양방향 체크인
     - cron: '0 11 * * 0'   # 일요일 KST 20:00 — 주간 추천+회고
   workflow_dispatch:
     inputs:
       mode:
-        description: 'daily | weekly'
+        description: 'daily | weekly | checkin'
         required: false
         default: 'daily'
 
@@ -36,11 +37,15 @@ jobs:
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SCHEDULE: ${{ github.event.schedule }}
           DISPATCH_MODE: ${{ github.event.inputs.mode }}
         run: |
           if [ "$SCHEDULE" = "0 11 * * 0" ]; then
             export NEURAL_FLOW_MODE=weekly
+          elif [ "$SCHEDULE" = "0 13 * * *" ]; then
+            export NEURAL_FLOW_MODE=checkin
           elif [ -n "$DISPATCH_MODE" ]; then
             export NEURAL_FLOW_MODE="$DISPATCH_MODE"
           else
