@@ -42,6 +42,7 @@ neural-flow/embeddings_cache.json
 youtube_brain/knowledge.db
 youtube_brain/*_preview.html
 youtube_brain/*_cache.json
+youtube_brain/notion.json
 
 # python
 __pycache__/

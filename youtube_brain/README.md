@@ -111,18 +111,25 @@ youtube_brain/
 - **🤖 데일리 큐레이터 자동 적재** — `curator_bot.py`가 매일 큐레이션한 영상 중
   유튜브 링크를 자동으로 `ingest`해 지식DB를 키운다. `curator.yml`이 `knowledge.jsonl`을 커밋.
   끄려면 `YT_BRAIN_ARCHIVE=0`.
+- **🕸️ 지식맵** — `app/knowledge/map/page.tsx` (`/knowledge/map`). 태그 클라우드 +
+  공유 키워드로 본 영상 연결 그래프(서버 렌더 SVG).
 - **📬 주간 다이제스트** — 최근 N일 새로 쌓인 지식을 카테고리별로 모아 이메일.
   `python -m youtube_brain digest --days 7` · `youtube-brain-digest.yml`이 일요일 19:00(KST) 발송.
+- **📔 노션 연동** — 지식 카드를 노션 '📺 유튜브 지식' DB에 페이지로 적재(영상=한 페이지).
+  `python -m youtube_brain notion [--days 7 | --all]` (`NOTION_TOKEN` 필요).
+  대상 DB는 같은 제목으로 검색→없으면 자동 생성(중복 생성 방지). 부모는 기본 neural-flow 허브,
+  `YT_BRAIN_NOTION_PARENT`/`YT_BRAIN_NOTION_DB` 로 지정 가능. `curator.yml`/`youtube-brain.yml`이
+  토큰 있을 때 자동 동기화.
 
 ## 자동화 (GitHub Actions)
 
-- `youtube-brain.yml` — **수동 실행**. `target`(링크/키워드)·`max` 입력 → 수집 후 커밋.
+- `youtube-brain.yml` — **수동 실행**. `target`(링크/키워드)·`max` 입력 → 수집 → (노션) → 커밋.
 - `youtube-brain-digest.yml` — **일요일 주간 다이제스트** 이메일(읽기 전용).
-- `curator.yml` — 매일 자동 실행 시 큐레이션 영상이 함께 적재된다.
+- `curator.yml` — 매일 큐레이션 영상 적재 + 노션 동기화.
 
 ---
 
 ## 다음 단계(확장 아이디어)
 
-- **노션 연동**: 다이제스트를 이메일 대신(또는 함께) 노션 DB에 적재.
-- **태그 그래프**: keywords/entities 로 영상 간 연결을 시각화.
+- **노션 양방향**: 노션에서 시청 메모를 달면 다시 지식DB로 가져오기.
+- **태그 그래프 고도화**: entities/카테고리 가중치, 클러스터링.

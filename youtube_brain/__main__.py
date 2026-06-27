@@ -8,6 +8,7 @@ youtube_brain CLI
   python -m youtube_brain list [--limit 20]          # 쌓인 지식 목록
   python -m youtube_brain stats                      # 통계
   python -m youtube_brain digest [--days 7]          # 최근 N일 새 지식 주간 다이제스트(이메일)
+  python -m youtube_brain notion [--days 7 | --all]  # 지식을 노션 DB로 동기화(NOTION_TOKEN 필요)
   python -m youtube_brain selftest                   # 오프라인 자가검증(키/네트워크 불필요)
 """
 
@@ -24,7 +25,7 @@ from .pipeline import ingest_target, ask
 from .knowledge_base import KnowledgeBase
 from . import report
 
-_COMMANDS = {"ingest", "ask", "search", "list", "stats", "digest", "selftest"}
+_COMMANDS = {"ingest", "ask", "search", "list", "stats", "digest", "notion", "selftest"}
 
 
 def main(argv=None):
@@ -57,6 +58,9 @@ def main(argv=None):
     sub.add_parser("stats", help="통계")
     pdg = sub.add_parser("digest", help="주간 다이제스트(이메일)")
     pdg.add_argument("--days", type=int, default=7)
+    pno = sub.add_parser("notion", help="노션 DB로 동기화")
+    pno.add_argument("--days", type=int, default=7)
+    pno.add_argument("--all", action="store_true", help="전체 동기화")
     sub.add_parser("selftest", help="오프라인 자가검증")
 
     args = p.parse_args(argv)
@@ -65,7 +69,7 @@ def main(argv=None):
         return
     {"ingest": _cmd_ingest, "ask": _cmd_ask, "search": _cmd_search,
      "list": _cmd_list, "stats": _cmd_stats, "digest": _cmd_digest,
-     "selftest": _cmd_selftest}[args.cmd](args)
+     "notion": _cmd_notion, "selftest": _cmd_selftest}[args.cmd](args)
 
 
 def _cmd_ingest(args):
@@ -123,6 +127,18 @@ def _cmd_stats(args):
 def _cmd_digest(args):
     from .digest import run
     run(days=args.days)
+
+
+def _cmd_notion(args):
+    from .notion_sync import sync
+    from .digest import recent_records
+    kb = KnowledgeBase()
+    recs = kb.all_records() if args.all else recent_records(kb, args.days)
+    if not recs:
+        print("동기화할 지식이 없습니다.")
+        return
+    print(f"📔 노션 동기화 — {len(recs)}개 {'(전체)' if args.all else f'(최근 {args.days}일)'}")
+    sync(recs)
 
 
 # ── 오프라인 자가검증(키/네트워크 없이 DB·검색·RAG 폴백 경로 점검) ──────────────

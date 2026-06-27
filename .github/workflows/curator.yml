@@ -37,6 +37,13 @@ jobs:
         run: |
           python curator_bot.py
 
+      - name: Sync new videos to Notion (NOTION_TOKEN 있을 때만)
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          YT_BRAIN_NOTION_DB: ${{ secrets.YT_BRAIN_NOTION_DB }}
+        run: |
+          python -m youtube_brain notion --days 3
+
       - name: Commit and Push History
         run: |
           git config --global user.name "github-actions[bot]"

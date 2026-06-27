@@ -42,6 +42,13 @@ jobs:
         run: |
           python -m youtube_brain ingest "$TARGET" --max "$MAXN"
 
+      - name: Sync to Notion (NOTION_TOKEN 있을 때만)
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          YT_BRAIN_NOTION_DB: ${{ secrets.YT_BRAIN_NOTION_DB }}
+        run: |
+          python -m youtube_brain notion --days 1
+
       - name: Commit Knowledge
         run: |
           git config --global user.name "github-actions[bot]"
