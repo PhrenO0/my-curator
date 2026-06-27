@@ -16,6 +16,7 @@
             메타+자막 수집      Gemini 요약(지식카드)   SQLite 저장+임베딩     의미검색→RAG 답변
 ```
 
+- **입력 자유** — 단일 영상 링크 · **재생목록/채널 통째로** · 키워드 검색 모두 한 명령으로.
 - **자막이 곧 영상의 내용** — `youtube-transcript-api`로 스크립트를 받아 요약하므로 "진짜 본 것"처럼 안다.
 - **데이터베이스** — `knowledge.db`(SQLite, 쿼리 가능) + `knowledge.jsonl`(git 버전관리·자동복원).
 - **다시 꺼내 쓰기** — `ask`로 내가 모은 영상들만 근거로 답(출처 번호 포함).
@@ -36,6 +37,10 @@ python -m youtube_brain "https://youtu.be/VIDEO_ID"
 
 # 2) 키워드 — 상위 영상들을 한꺼번에 (YOUTUBE_API_KEY 필요)
 python -m youtube_brain "AI 반도체 전망" --max 3
+
+# 2-1) 재생목록·채널 통째로 일괄 적재 (YOUTUBE_API_KEY 필요)
+python -m youtube_brain "https://www.youtube.com/playlist?list=PLxxxx" --max 30
+python -m youtube_brain "https://www.youtube.com/@channelhandle" --max 20
 
 # 3) 내 지식에 묻기(RAG) — 모은 영상들만 근거로 답
 python -m youtube_brain ask "HBM 투자 포인트 정리해줘"

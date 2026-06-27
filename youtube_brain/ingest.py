@@ -5,6 +5,8 @@ youtube_brain · 1단계 SENSE — 영상 수집(메타데이터 + 자막)
 자막(스크립트)을 가져온다. **자막이 곧 '영상의 내용'** 이다.
 
 - 링크 : video_id 추출 → 단일 영상 (watch?v= · youtu.be · shorts · embed · live)
+- 재생목록: playlist?list=... → 목록 영상 일괄 (YOUTUBE_API_KEY 필요)
+- 채널 : /@handle · /channel/UC... · /c/ · /user/ → 최근 업로드 일괄 (YOUTUBE_API_KEY 필요)
 - 키워드: YouTube Data API 검색 → 상위 N개 (YOUTUBE_API_KEY 필요)
 - 메타  : 키 있으면 Data API(조회수·길이까지), 없으면 oEmbed(제목·채널) — 둘 다 실패해도 진행
 - 자막  : youtube-transcript-api(키 불필요). ko→en→기타, 라이브러리 신/구 API 모두 대응.
@@ -41,26 +43,73 @@ def is_youtube_url(s):
     return "youtube.com" in s or "youtu.be" in s
 
 
+def extract_playlist_id(s):
+    """재생목록 id(list=...). 단, 임시/개인 목록(WL·LL·라디오 RD…)은 제외."""
+    m = re.search(r"[?&]list=([A-Za-z0-9_-]+)", s or "")
+    if not m:
+        return None
+    pid = m.group(1)
+    if pid in ("WL", "LL") or pid.startswith("RD"):
+        return None
+    return pid
+
+
+def extract_channel_ref(s):
+    """채널 참조 → (kind, value). kind ∈ {id, handle, user, legacy}."""
+    s = (s or "").strip()
+    m = re.search(r"/channel/(UC[A-Za-z0-9_-]+)", s)
+    if m:
+        return ("id", m.group(1))
+    m = re.search(r"youtube\.com/@([A-Za-z0-9_.\-]+)", s)
+    if m:
+        return ("handle", m.group(1))
+    m = re.search(r"youtube\.com/user/([^/?#]+)", s)
+    if m:
+        return ("user", m.group(1))
+    m = re.search(r"youtube\.com/c/([^/?#]+)", s)
+    if m:
+        return ("legacy", m.group(1))
+    return None
+
+
 def resolve_targets(query, max_results=5):
     """입력을 video_id 리스트로 변환. 반환: (ids, mode).
-    mode ∈ {"link", "url-no-video", "search"} — 호출부가 안내 메시지에 쓴다."""
+    mode ∈ {link, playlist, channel, url-no-video, search} — 호출부 안내 메시지에 쓴다.
+    우선순위: 단일 영상(watch?v=) > 재생목록(playlist?list=) > 채널 > 키워드."""
     vid = extract_video_id(query)
     if vid:
         return [vid], "link"
+    pl = extract_playlist_id(query)
+    if pl:
+        return playlist_video_ids(pl, max_results), "playlist"
+    ch = extract_channel_ref(query)
+    if ch:
+        return channel_video_ids(ch, max_results), "channel"
     if is_youtube_url(query):
-        return [], "url-no-video"   # 재생목록/채널 등 — 단일 영상이 아님
+        return [], "url-no-video"
     return search_video_ids(query, max_results), "search"
+
+
+def _yt_client():
+    """YouTube Data API 클라이언트(키 없으면 None). 검색·메타·재생목록·채널 공용."""
+    api_key = os.environ.get("YOUTUBE_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from googleapiclient.discovery import build
+        return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
+    except Exception as e:
+        print(f"[ingest] YouTube 클라이언트 생성 실패: {e}")
+        return None
 
 
 def search_video_ids(query, max_results=5):
     """키워드로 YouTube Data API 검색 → video_id 리스트."""
-    api_key = os.environ.get("YOUTUBE_API_KEY")
-    if not api_key:
+    yt = _yt_client()
+    if not yt:
         print("[ingest] 키워드 검색에는 YOUTUBE_API_KEY 가 필요합니다. (링크 직접 입력은 키 없이 동작)")
         return []
     try:
-        from googleapiclient.discovery import build
-        yt = build("youtube", "v3", developerKey=api_key, cache_discovery=False)
         resp = yt.search().list(
             part="snippet", q=query, type="video", order="relevance",
             maxResults=max_results, regionCode=os.environ.get("YT_REGION", "KR"),
@@ -71,6 +120,72 @@ def search_video_ids(query, max_results=5):
     except Exception as e:
         print(f"[ingest] 검색 실패('{query}'): {e}")
         return []
+
+
+def playlist_video_ids(playlist_id, max_results=5):
+    """재생목록 → video_id 리스트(최대 max_results, 페이지네이션)."""
+    yt = _yt_client()
+    if not yt:
+        print("[ingest] 재생목록 열거에는 YOUTUBE_API_KEY 가 필요합니다.")
+        return []
+    ids, token = [], None
+    try:
+        while len(ids) < max_results:
+            resp = yt.playlistItems().list(
+                part="contentDetails", playlistId=playlist_id,
+                maxResults=min(50, max_results - len(ids)), pageToken=token,
+            ).execute()
+            for it in resp.get("items", []):
+                vid = it.get("contentDetails", {}).get("videoId")
+                if vid:
+                    ids.append(vid)
+            token = resp.get("nextPageToken")
+            if not token:
+                break
+        ids = ids[:max_results]
+        print(f"[ingest] 재생목록 {playlist_id} → {len(ids)}개 영상")
+        return ids
+    except Exception as e:
+        print(f"[ingest] 재생목록 열거 실패({playlist_id}): {e}")
+        return []
+
+
+def _resolve_channel_id(yt, ref):
+    kind, val = ref
+    try:
+        if kind == "id":
+            return val
+        if kind == "handle":
+            r = yt.channels().list(part="id", forHandle=val).execute()
+        elif kind == "user":
+            r = yt.channels().list(part="id", forUsername=val).execute()
+        else:  # legacy /c/이름 → 검색으로 채널 찾기
+            r = yt.search().list(part="snippet", q=val, type="channel", maxResults=1).execute()
+            items = r.get("items", [])
+            return items[0]["snippet"]["channelId"] if items else None
+        items = r.get("items", [])
+        return items[0]["id"] if items else None
+    except Exception as e:
+        print(f"[ingest] 채널 ID 해석 실패({ref}): {e}")
+        return None
+
+
+def channel_video_ids(ref, max_results=5):
+    """채널 → 업로드 재생목록 → 최근 video_id 리스트."""
+    yt = _yt_client()
+    if not yt:
+        print("[ingest] 채널 열거에는 YOUTUBE_API_KEY 가 필요합니다.")
+        return []
+    cid = _resolve_channel_id(yt, ref)
+    if not cid:
+        return []
+    try:
+        items = yt.channels().list(part="contentDetails", id=cid).execute().get("items", [])
+        uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"] if items else None
+    except Exception as e:
+        print(f"[ingest] 채널 업로드 목록 조회 실패({cid}): {e}")
+        return []
+    return playlist_video_ids(uploads, max_results) if uploads else []
 
 
 # ── 메타데이터 ────────────────────────────────────────────────────────────────
@@ -88,11 +203,9 @@ def fetch_metadata(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     meta = {"video_id": video_id, "url": url, "title": "", "channel": "",
             "published": "", "duration_sec": 0, "views": 0, "description": ""}
-    api_key = os.environ.get("YOUTUBE_API_KEY")
-    if api_key:
+    yt = _yt_client()
+    if yt:
         try:
-            from googleapiclient.discovery import build
-            yt = build("youtube", "v3", developerKey=api_key, cache_discovery=False)
             items = yt.videos().list(part="snippet,contentDetails,statistics", id=video_id).execute().get("items", [])
             if items:
                 it = items[0]

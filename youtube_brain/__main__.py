@@ -78,8 +78,10 @@ def _cmd_ingest(args):
     print(f"🎬 ingest: {target}")
     out = ingest_target(target, max_results=args.max, langs=langs, force=args.force)
     if not out["results"]:
-        if out["mode"] == "url-no-video":
-            print("⚠️ 링크에서 video_id 를 못 찾았습니다(재생목록/채널?). 단일 영상 링크를 주세요.")
+        if out["mode"] in ("playlist", "channel"):
+            print(f"⚠️ {out['mode']} 열거 결과 없음 — YOUTUBE_API_KEY 가 필요하거나 항목을 못 찾았습니다.")
+        elif out["mode"] == "url-no-video":
+            print("⚠️ 링크에서 영상을 못 찾았습니다. 단일 영상/재생목록(list=)/채널 링크를 주세요.")
         else:
             print("⚠️ 결과 없음. 키워드 검색은 YOUTUBE_API_KEY 가 필요합니다.")
         return
