@@ -7,6 +7,7 @@ youtube_brain CLI
   python -m youtube_brain search "검색어" [-k 8]     # 지식DB 의미/키워드 검색
   python -m youtube_brain list [--limit 20]          # 쌓인 지식 목록
   python -m youtube_brain stats                      # 통계
+  python -m youtube_brain digest [--days 7]          # 최근 N일 새 지식 주간 다이제스트(이메일)
   python -m youtube_brain selftest                   # 오프라인 자가검증(키/네트워크 불필요)
 """
 
@@ -23,7 +24,7 @@ from .pipeline import ingest_target, ask
 from .knowledge_base import KnowledgeBase
 from . import report
 
-_COMMANDS = {"ingest", "ask", "search", "list", "stats", "selftest"}
+_COMMANDS = {"ingest", "ask", "search", "list", "stats", "digest", "selftest"}
 
 
 def main(argv=None):
@@ -54,6 +55,8 @@ def main(argv=None):
     pl.add_argument("--limit", type=int, default=20)
 
     sub.add_parser("stats", help="통계")
+    pdg = sub.add_parser("digest", help="주간 다이제스트(이메일)")
+    pdg.add_argument("--days", type=int, default=7)
     sub.add_parser("selftest", help="오프라인 자가검증")
 
     args = p.parse_args(argv)
@@ -61,7 +64,8 @@ def main(argv=None):
         p.print_help()
         return
     {"ingest": _cmd_ingest, "ask": _cmd_ask, "search": _cmd_search,
-     "list": _cmd_list, "stats": _cmd_stats, "selftest": _cmd_selftest}[args.cmd](args)
+     "list": _cmd_list, "stats": _cmd_stats, "digest": _cmd_digest,
+     "selftest": _cmd_selftest}[args.cmd](args)
 
 
 def _cmd_ingest(args):
@@ -114,6 +118,11 @@ def _cmd_stats(args):
     print(f"📚 지식DB 통계\n  총 {s['total']}개 · 자막보유 {s['with_transcript']} · 임베딩 {s['embedded']}")
     for cat, n in s["categories"]:
         print(f"  - {cat or '미분류'}: {n}")
+
+
+def _cmd_digest(args):
+    from .digest import run
+    run(days=args.days)
 
 
 # ── 오프라인 자가검증(키/네트워크 없이 DB·검색·RAG 폴백 경로 점검) ──────────────

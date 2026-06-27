@@ -1,0 +1,38 @@
+name: YouTube Brain — Weekly Digest
+
+on:
+  schedule:
+    - cron: '0 10 * * 0'   # 일요일 KST 19:00 — 주간 다이제스트
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '며칠치 새 지식을 모을지'
+        required: false
+        default: '7'
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Send Weekly Digest
+        env:
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+          DAYS: ${{ github.event.inputs.days || '7' }}
+        run: |
+          python -m youtube_brain digest --days "$DAYS"

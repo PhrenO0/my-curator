@@ -40,10 +40,11 @@ python -m youtube_brain "AI 반도체 전망" --max 3
 # 3) 내 지식에 묻기(RAG) — 모은 영상들만 근거로 답
 python -m youtube_brain ask "HBM 투자 포인트 정리해줘"
 
-# 4) 검색 / 목록 / 통계
+# 4) 검색 / 목록 / 통계 / 주간 다이제스트(이메일)
 python -m youtube_brain search "부동산 금리"
 python -m youtube_brain list
 python -m youtube_brain stats
+python -m youtube_brain digest --days 7
 
 # 5) 키·네트워크 없이 파이프라인 자가검증
 python -m youtube_brain selftest
@@ -103,18 +104,25 @@ youtube_brain/
 - **📊 대시보드** — `app/knowledge/page.tsx` (`/knowledge`). `knowledge.jsonl`을 읽어
   카드·카테고리 필터로 보여준다. 홈(`/`) 상단 `📺 유튜브 지식` 버튼으로 이동.
   (`next.config.ts`의 `outputFileTracingIncludes`로 Vercel 번들에 파일 포함)
+- **🔎 대시보드 검색창(의미검색 + RAG)** — `/knowledge` 상단 검색창에 질문하면,
+  저장된 임베딩에 질의 임베딩(Gemini REST)을 코사인 비교해 관련 영상을 찾고,
+  그 근거로 한국어 답변(출처 [n] 포함)을 만든다. 키 없으면 키워드검색으로 폴백.
+  (`app/knowledge/search.ts` — `GOOGLE_API_KEY`는 서버에서만 사용)
 - **🤖 데일리 큐레이터 자동 적재** — `curator_bot.py`가 매일 큐레이션한 영상 중
   유튜브 링크를 자동으로 `ingest`해 지식DB를 키운다. `curator.yml`이 `knowledge.jsonl`을 커밋.
   끄려면 `YT_BRAIN_ARCHIVE=0`.
+- **📬 주간 다이제스트** — 최근 N일 새로 쌓인 지식을 카테고리별로 모아 이메일.
+  `python -m youtube_brain digest --days 7` · `youtube-brain-digest.yml`이 일요일 19:00(KST) 발송.
 
 ## 자동화 (GitHub Actions)
 
-- `.github/workflows/youtube-brain.yml` — **Actions 탭에서 수동 실행**. `target`(링크/키워드)·`max` 입력 → 수집 후 커밋.
-- `.github/workflows/curator.yml` — 매일 자동 실행 시 큐레이션 영상이 함께 적재된다.
+- `youtube-brain.yml` — **수동 실행**. `target`(링크/키워드)·`max` 입력 → 수집 후 커밋.
+- `youtube-brain-digest.yml` — **일요일 주간 다이제스트** 이메일(읽기 전용).
+- `curator.yml` — 매일 자동 실행 시 큐레이션 영상이 함께 적재된다.
 
 ---
 
 ## 다음 단계(확장 아이디어)
 
-- **주간 다이제스트**: 새로 쌓인 카드만 모아 이메일/노션으로.
-- **대시보드 검색창**: `/knowledge`에 의미검색 입력(서버 액션 + `ask`) 추가.
+- **노션 연동**: 다이제스트를 이메일 대신(또는 함께) 노션 DB에 적재.
+- **태그 그래프**: keywords/entities 로 영상 간 연결을 시각화.
