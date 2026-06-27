@@ -1,8 +1,6 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { type Rec, rankRecords, ragAnswer } from "./search";
+import { type Rec, rankRecords, ragAnswer, loadKnowledge, catColor, fmtDuration } from "./search";
 
 // knowledge.jsonl 은 youtube_brain 파이프라인이 갱신하므로 요청 시마다 새로 읽는다.
 export const dynamic = "force-dynamic";
@@ -11,51 +9,6 @@ export const metadata = {
   title: "📺 유튜브 지식 — youtube_brain",
   description: "유튜브 영상을 요약해 쌓은 개인 지식DB.",
 };
-
-const CAT_COLOR: Record<string, string> = {
-  AI: "#38bdf8",
-  반도체: "#a78bfa",
-  경제: "#fb923c",
-  부동산: "#34d399",
-  주식: "#fbbf24",
-  창업: "#f472b6",
-  노동시장: "#60a5fa",
-  기타: "#94a3b8",
-};
-
-function catColor(cat?: string): string {
-  return (cat && CAT_COLOR[cat]) || "#94a3b8";
-}
-
-function fmtDuration(sec?: number): string {
-  const s = Math.max(0, Math.floor(sec ?? 0));
-  if (!s) return "";
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = s % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return h ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
-}
-
-function loadKnowledge(): Rec[] {
-  try {
-    const p = join(process.cwd(), "youtube_brain", "knowledge.jsonl");
-    const raw = readFileSync(p, "utf-8");
-    const out: Rec[] = [];
-    for (const line of raw.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
-      try {
-        out.push(JSON.parse(t) as Rec);
-      } catch {
-        // 손상된 줄은 건너뛴다 (파이프라인과 동일한 방어)
-      }
-    }
-    return out;
-  } catch {
-    return []; // 파일이 아직 없거나 비어 있음
-  }
-}
 
 const cardStyle: CSSProperties = { background: "#1e293b", borderRadius: 16, padding: 20, marginBottom: 14 };
 const tagStyle: CSSProperties = {
@@ -163,9 +116,14 @@ export default async function Knowledge({
   return (
     <main style={{ maxWidth: 760, margin: "0 auto", padding: "32px 18px 64px" }}>
       <header style={{ marginBottom: 16 }}>
-        <Link href="/" style={{ color: "#38bdf8", fontSize: 13, textDecoration: "none" }}>
-          ← 대시보드
-        </Link>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <Link href="/" style={{ color: "#38bdf8", fontSize: 13, textDecoration: "none" }}>
+            ← 대시보드
+          </Link>
+          <Link href="/knowledge/map" style={{ color: "#a78bfa", fontSize: 13, textDecoration: "none" }}>
+            🕸️ 지식맵 →
+          </Link>
+        </div>
         <h1 style={{ margin: "8px 0 4px", fontSize: 26 }}>📺 유튜브 지식</h1>
         <p style={{ color: "#94a3b8", margin: 0, lineHeight: 1.6 }}>
           영상을 요약해 쌓은 나만의 지식DB · 총 {all.length}개

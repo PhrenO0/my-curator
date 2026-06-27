@@ -3,6 +3,8 @@
 // knowledge.jsonl 에 저장된 임베딩과, 질의 임베딩(Gemini REST)을 코사인 비교해 의미검색.
 // 키가 없으면 어휘(키워드) 매칭으로 폴백. GOOGLE_API_KEY 는 서버에서만 쓰며 클라이언트로 안 나간다.
 import "server-only";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export type Rec = {
   video_id: string;
@@ -30,6 +32,53 @@ export type Rec = {
 export type Ranked = { rec: Rec; score: number; match: "semantic" | "keyword" };
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+
+// ── 공용 데이터/표현 헬퍼 (page.tsx · map/page.tsx 가 공유) ──────────────────
+export const CAT_COLOR: Record<string, string> = {
+  AI: "#38bdf8",
+  반도체: "#a78bfa",
+  경제: "#fb923c",
+  부동산: "#34d399",
+  주식: "#fbbf24",
+  창업: "#f472b6",
+  노동시장: "#60a5fa",
+  기타: "#94a3b8",
+};
+
+export function catColor(cat?: string): string {
+  return (cat && CAT_COLOR[cat]) || "#94a3b8";
+}
+
+export function fmtDuration(sec?: number): string {
+  const s = Math.max(0, Math.floor(sec ?? 0));
+  if (!s) return "";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
+}
+
+// knowledge.jsonl 한 줄 = 카드 하나. 손상된 줄은 건너뛴다(파이프라인과 동일 방어).
+export function loadKnowledge(): Rec[] {
+  try {
+    const p = join(process.cwd(), "youtube_brain", "knowledge.jsonl");
+    const raw = readFileSync(p, "utf-8");
+    const out: Rec[] = [];
+    for (const line of raw.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        out.push(JSON.parse(t) as Rec);
+      } catch {
+        /* skip corrupt line */
+      }
+    }
+    return out;
+  } catch {
+    return []; // 파일이 아직 없거나 비어 있음
+  }
+}
 
 function cosine(a: number[], b: number[]): number {
   if (!a || !b || a.length !== b.length) return 0;
