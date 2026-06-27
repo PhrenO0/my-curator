@@ -148,6 +148,32 @@ export async function rankRecords(recs: Rec[], q: string, k = 8): Promise<Ranked
   return scored.slice(0, k);
 }
 
+// ── 비슷한 영상: 임베딩 코사인, 없으면 키워드/카테고리 겹침 ──────────────────
+function kwOverlap(a: Rec, b: Rec): number {
+  const sa = new Set((a.keywords ?? []).map((k) => k.toLowerCase()));
+  let n = 0;
+  for (const k of b.keywords ?? []) if (sa.has(k.toLowerCase())) n++;
+  if (a.category && a.category === b.category) n += 0.5;
+  return n;
+}
+
+export function relatedFor(all: Rec[], target: Rec, k = 3): Rec[] {
+  const others = all.filter((r) => r.video_id !== target.video_id);
+  const tv = target.embedding;
+  if (Array.isArray(tv) && tv.length) {
+    const scored = others
+      .filter((r) => Array.isArray(r.embedding) && r.embedding!.length === tv.length)
+      .map((r) => ({ r, s: cosine(tv, r.embedding as number[]) }));
+    if (scored.length) {
+      scored.sort((a, b) => b.s - a.s);
+      return scored.slice(0, k).map((x) => x.r);
+    }
+  }
+  const scored = others.map((r) => ({ r, s: kwOverlap(target, r) })).filter((x) => x.s > 0);
+  scored.sort((a, b) => b.s - a.s);
+  return scored.slice(0, k).map((x) => x.r);
+}
+
 // 검색 결과를 근거로 Gemini 가 한국어 답변(출처 번호 포함). 키 없으면 null → 카드만 노출.
 export async function ragAnswer(question: string, top: Rec[]): Promise<string | null> {
   const key = process.env.GOOGLE_API_KEY;

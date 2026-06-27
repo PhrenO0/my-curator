@@ -244,6 +244,49 @@ class KnowledgeBase:
             out.append(rec)
         return out
 
+    def related(self, video_id, k=5):
+        """이 영상과 비슷한 영상 — 임베딩 코사인, 없으면 키워드/카테고리 겹침."""
+        row = self.conn.execute("SELECT embedding FROM cards WHERE video_id=?", (video_id,)).fetchone()
+        if not row:
+            return []
+        emb = _load(row["embedding"])
+        if emb:
+            recs = self.conn.execute(
+                "SELECT video_id, embedding FROM cards WHERE video_id != ? AND embedding != ''",
+                (video_id,)).fetchall()
+            scored = []
+            for r in recs:
+                v = _load(r["embedding"])
+                if v:
+                    scored.append((cosine(emb, v), r["video_id"]))
+            if scored:
+                scored.sort(reverse=True)
+                out = []
+                for s, vid in scored[:k]:
+                    rec = self.get(vid)
+                    rec["score"], rec["match"] = round(s, 4), "semantic"
+                    out.append(rec)
+                return out
+        return self._related_lexical(video_id, k)
+
+    def _related_lexical(self, video_id, k):
+        tgt = self.get(video_id)
+        if not tgt:
+            return []
+        tkw = {x.lower() for x in (tgt.get("keywords") or [])}
+        tcat = tgt.get("category")
+        scored = []
+        for r in self.all_records():
+            if r["video_id"] == video_id:
+                continue
+            kw = {x.lower() for x in (r.get("keywords") or [])}
+            s = len(tkw & kw) + (0.5 if tcat and r.get("category") == tcat else 0)
+            if s > 0:
+                r["score"], r["match"] = round(s, 4), "lexical"
+                scored.append((s, r))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [r for _, r in scored[:k]]
+
     # ── 이식(JSONL) ───────────────────────────────────────────────────────────
     def export_jsonl(self):
         """카드+임베딩을 knowledge.jsonl 로 내보낸다(원본 자막·설명은 제외해 가볍게)."""

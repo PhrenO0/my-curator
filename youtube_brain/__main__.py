@@ -5,6 +5,7 @@ youtube_brain CLI
   python -m youtube_brain ingest <링크|키워드> [--max N] [--force] [--lang ko,en] [--email]
   python -m youtube_brain ask "질문" [-k 5]          # 내 지식에 묻기(RAG)
   python -m youtube_brain search "검색어" [-k 8]     # 지식DB 의미/키워드 검색
+  python -m youtube_brain related "영상|URL" [-k 5]  # 비슷한 영상 추천
   python -m youtube_brain list [--limit 20]          # 쌓인 지식 목록
   python -m youtube_brain stats                      # 통계
   python -m youtube_brain digest [--days 7]          # 최근 N일 새 지식 주간 다이제스트(이메일)
@@ -25,7 +26,7 @@ from .pipeline import ingest_target, ask
 from .knowledge_base import KnowledgeBase
 from . import report
 
-_COMMANDS = {"ingest", "ask", "search", "list", "stats", "digest", "notion", "selftest"}
+_COMMANDS = {"ingest", "ask", "search", "related", "list", "stats", "digest", "notion", "selftest"}
 
 
 def main(argv=None):
@@ -52,6 +53,10 @@ def main(argv=None):
     ps.add_argument("query", nargs="+")
     ps.add_argument("-k", type=int, default=8)
 
+    prl = sub.add_parser("related", help="비슷한 영상")
+    prl.add_argument("target", nargs="+")
+    prl.add_argument("-k", type=int, default=5)
+
     pl = sub.add_parser("list", help="지식 목록")
     pl.add_argument("--limit", type=int, default=20)
 
@@ -68,8 +73,8 @@ def main(argv=None):
         p.print_help()
         return
     {"ingest": _cmd_ingest, "ask": _cmd_ask, "search": _cmd_search,
-     "list": _cmd_list, "stats": _cmd_stats, "digest": _cmd_digest,
-     "notion": _cmd_notion, "selftest": _cmd_selftest}[args.cmd](args)
+     "related": _cmd_related, "list": _cmd_list, "stats": _cmd_stats,
+     "digest": _cmd_digest, "notion": _cmd_notion, "selftest": _cmd_selftest}[args.cmd](args)
 
 
 def _cmd_ingest(args):
@@ -107,6 +112,22 @@ def _cmd_search(args):
     for i, h in enumerate(hits, 1):
         sc = f"{h['match']} {h['score']}" if h.get("score") is not None else h.get("match", "")
         print(f"{i}. {h.get('title', '')}  ({sc})\n   {h.get('one_liner', '')}\n   {h.get('url', '')}")
+
+
+def _cmd_related(args):
+    from .ingest import extract_video_id
+    raw = " ".join(args.target)
+    vid = extract_video_id(raw) or raw
+    kb = KnowledgeBase()
+    if not kb.exists(vid):
+        print(f"지식DB에 없는 영상입니다: {vid}")
+        return
+    tgt = kb.get(vid)
+    hits = kb.related(vid, k=args.k)
+    print(f"🔗 '{tgt.get('title', '')}' 와(과) 비슷한 영상 {len(hits)}건")
+    for i, h in enumerate(hits, 1):
+        sc = f"{h.get('match')} {h.get('score')}"
+        print(f"{i}. {h.get('title', '')}  ({sc})\n   {h.get('url', '')}")
 
 
 def _cmd_list(args):

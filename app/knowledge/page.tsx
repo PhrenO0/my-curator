@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { type Rec, rankRecords, ragAnswer, loadKnowledge, catColor, fmtDuration } from "./search";
+import { type Rec, rankRecords, ragAnswer, relatedFor, loadKnowledge, catColor, fmtDuration } from "./search";
 
 // knowledge.jsonl 은 youtube_brain 파이프라인이 갱신하므로 요청 시마다 새로 읽는다.
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ const tagStyle: CSSProperties = {
   display: "inline-block",
 };
 
-function KnowledgeCard({ r, badge }: { r: Rec; badge?: string }) {
+function KnowledgeCard({ r, badge, related }: { r: Rec; badge?: string; related?: Rec[] }) {
   const color = catColor(r.category);
   const meta = [r.channel, fmtDuration(r.duration_sec), r.views ? `조회 ${r.views.toLocaleString()}` : ""]
     .filter(Boolean)
@@ -78,6 +78,20 @@ function KnowledgeCard({ r, badge }: { r: Rec; badge?: string }) {
       )}
 
       {r.note && <div style={{ color: "#64748b", fontSize: 12, marginTop: 8 }}>⚠️ {r.note}</div>}
+
+      {(related ?? []).length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8", borderTop: "1px solid #334155", paddingTop: 8 }}>
+          🔗 비슷한 영상:{" "}
+          {related!.map((rr, i) => (
+            <span key={rr.video_id}>
+              {i > 0 ? " · " : ""}
+              <a href={rr.url} target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa", textDecoration: "none" }}>
+                {(rr.title || "(제목 없음)").slice(0, 24)}
+              </a>
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -91,6 +105,12 @@ export default async function Knowledge({
   const all = loadKnowledge();
   const active = sp.cat ?? "";
   const q = (sp.q ?? "").trim();
+
+  // 카드별 '비슷한 영상'(임베딩/키워드). 개인 규모에서만 O(N²) 계산.
+  const relatedMap = new Map<string, Rec[]>();
+  if (all.length > 1 && all.length <= 300) {
+    for (const r of all) relatedMap.set(r.video_id, relatedFor(all, r, 3));
+  }
 
   const catCounts = new Map<string, number>();
   for (const r of all) {
@@ -222,7 +242,7 @@ export default async function Knowledge({
                 관련 영상 {ranked.length}건 ({ranked[0].match === "semantic" ? "의미검색" : "키워드"})
               </h2>
               {ranked.map((x, i) => (
-                <KnowledgeCard key={x.rec.video_id} r={x.rec} badge={`[${i + 1}]`} />
+                <KnowledgeCard key={x.rec.video_id} r={x.rec} badge={`[${i + 1}]`} related={relatedMap.get(x.rec.video_id)} />
               ))}
             </>
           )}
@@ -232,7 +252,7 @@ export default async function Knowledge({
       {/* === 일반 목록 모드 === */}
       {!q &&
         (active ? all.filter((r) => (r.category || "기타") === active) : all).map((r) => (
-          <KnowledgeCard key={r.video_id} r={r} />
+          <KnowledgeCard key={r.video_id} r={r} related={relatedMap.get(r.video_id)} />
         ))}
 
       <footer style={{ textAlign: "center", color: "#475569", fontSize: 12, marginTop: 24 }}>
