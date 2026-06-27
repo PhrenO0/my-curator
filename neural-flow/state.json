@@ -47,8 +47,15 @@
       "약한 툴 1개(GA4/Amplitude) + 현직자 커피챗 3명"
     ],
     "career_map": {
-      "version": "v2 (2026-06-26)",
-      "positioning": "CX형 AI 서비스기획자(Experience-led Product Builder) = 짓고 파는 메이커. 사용자의 불안·마찰을 AI·콘텐츠·공간으로 다음 행동 확신으로.",
+      "version": "v3 (2026-06-27, 딥리서치 반영)",
+      "positioning": "AI 서비스기획·CX 제품 메이커(practice-expert craft, 도메인 이식 가능) = 짓고 파는 메이커. 사용자의 불안·마찰을 다음 행동 확신으로.",
+      "track": "창업=목적(큰 자산·지분), 취업=창업 도제(시드 AI 스타트업 0→1 빌더). 큰돈은 지분에서.",
+      "domain_bets": {
+        "1차": "콘텐츠/크리에이터×AI 툴 빌더 — 솔로창업성·강점·시장 고성장·한국 인력갭(KOCCA)",
+        "2차_장기해자": "공간/프롭테크×AI — 희소 부동산 자격·깊은 방어성, 단 팀/산학·B2B 적합",
+        "제외": "금융(강점 반대·진입비용 최대)",
+        "근거": "딥리서치 111에이전트/25검증→15확정: 단일버티컬 pigeonhole 리스크 + practice-expert craft 이식성 + 컨슈머SW 솔로창업성 + Sophia Smith Galer 아키타입"
+      },
       "market_fit_2026": {
         "vibe_code_mvp": "neural-flow·대시보드를 직접 빌드(동작하는 제품)",
         "agentic_ai": "SENSE→THINK→ACT 에이전트 + 회랑 HITL 설계",
