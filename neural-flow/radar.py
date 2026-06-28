@@ -27,12 +27,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 KST = timezone(timedelta(hours=9))
 
 # 준상 프로필에 맞춘 기회 검색어
+# v3 전략(콘텐츠/크리에이터×AI · AI 서비스기획/PM·BD · 창업)에 맞춘 기회 쿼리.
+# 링커리어 우회: 링커리어는 봇 차단(403)이라 직접 못 긁지만, 네이버가 링커리어를
+# 색인하므로 네이버 검색 API로 링커리어 공고가 우회 수집된다.
 OPP_QUERIES = [
-    "AI 마케팅 인턴 채용",
-    "그로스 마케터 신입 채용",
-    "대학생 마케팅 콘텐츠 공모전",
-    "콘텐츠 앰버서더 서포터즈 모집",
-    "청년 창업 지원사업 모집",
+    # 1차 도메인: 콘텐츠/크리에이터 × AI
+    "생성형 AI 영상 콘텐츠 공모전 접수",
+    "AI 공모전 대학생 마감 상금",
+    # 직무: AI 서비스기획/PM · BD · 그로스
+    "AI 서비스기획 체험형 인턴 모집",
+    "사업개발 BD 제휴 인턴 대학생",
+    "그로스 마케터 콘텐츠 인턴 스타트업",
+    # 창업 트랙
+    "대학생 예비창업 지원사업 모집",
+    # 산학협력
+    "산학협력 현장실습 인턴 모집",
+    # 링커리어 우회(네이버 인덱스 경유)
+    "링커리어 인턴 공모전 AI 콘텐츠",
 ]
 # 'Threads = 기술/DB 최신정보의 근원'
 TECH_KEYWORDS = ["vector database", "RAG", "AI agent", "LLM", "데이터베이스", "프롬프트 엔지니어링"]
@@ -181,23 +192,25 @@ def get_llm():
 
 def curate(opps, threads):
     llm = get_llm()
+    # 폴백(키 없음/무효/오류 공통) — 원본 상위 항목 그대로.
+    fallback = {
+        "opportunities": [
+            {"title": o["title"], "why": o["q"], "link": o["link"]} for o in opps[:7]
+        ],
+        "tech": [
+            {"summary": t["text"], "source": t.get("username", "")} for t in threads[:5]
+        ],
+        "one_move": "Gemini 폴백 — 원본 상위 항목.",
+    }
     if llm is None:
-        return {
-            "opportunities": [
-                {"title": o["title"], "why": o["q"], "link": o["link"]} for o in opps[:7]
-            ],
-            "tech": [
-                {"summary": t["text"], "source": t.get("username", "")} for t in threads[:5]
-            ],
-            "one_move": "Gemini 키 없음 — 원본 상위 항목.",
-        }
+        return fallback
     prompt = f"""너는 준상의 커리어 멘토 'neural-flow 레이더'다.
-준상: AI 그로스/콘텐츠 마케터 지망, 부동산 복수전공(프롭테크×AI 와일드카드), 생성형 AI 광고 수상,
-선거캠프 숏폼 10만 조회. 약점은 과확장 → 적게, 정확히.
+준상: CX형 AI 서비스기획·콘텐츠×AI 메이커 지망(창업 목적). 1차=콘텐츠/크리에이터×AI,
+2차=공간×AI(부동산 복수전공). 직무는 AI 서비스기획/PM·BD. 약점은 과확장 → 적게, 정확히.
 
 아래 원본에서 '지금 준상에게 가치 있는' 것만 골라 큐레이션하라.
 
-[기회 원본 — 채용·공모전·앰버서더·지원금]
+[기회 원본 — 공모전·인턴·BD·창업·산학]
 {json.dumps(opps[:30], ensure_ascii=False)[:6000]}
 
 [기술·DB 최신(Threads·GitHub Trending·Hacker News·RSS)]
@@ -208,14 +221,18 @@ JSON만 출력(코드펜스 금지):
   "tech":[{{"summary":"기술/DB 핵심 한 줄","source":"username 또는 permalink"}}],
   "one_move":"이번 주 단 하나의 실행 추천"}}
 기회 5~7개·기술 3~5개. 중요도순. 과확장 금지."""
-    raw = (llm.invoke(prompt).content or "").strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1].lstrip("json").strip() if "```" in raw else raw
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        s, e = raw.find("{"), raw.rfind("}")
-        return json.loads(raw[s : e + 1])
+        raw = (llm.invoke(prompt).content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].lstrip("json").strip() if "```" in raw else raw
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            s, e = raw.find("{"), raw.rfind("}")
+            return json.loads(raw[s : e + 1])
+    except Exception as ex:
+        print(f"[radar] 큐레이션 LLM 실패 → 원본 폴백: {ex}")
+        return fallback
 
 
 # ── 출력 ──────────────────────────────────────────────────────────────────────
