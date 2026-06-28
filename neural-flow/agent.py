@@ -152,25 +152,31 @@ def build_prompt(state, today, deadlines, balance_counts, weakest, mode):
 def think(state, today, deadlines, balance_counts, weakest, mode):
     llm = get_llm()
     prompt = build_prompt(state, today, deadlines, balance_counts, weakest, mode)
+    # 결정론적 폴백 — 키가 없거나(None) '있는데 무효'여도 시스템이 죽지 않게.
+    urgent = deadlines[0]["title"] if deadlines else "오늘의 핵심 1개를 정한다"
+    fallback = {
+        "greeting": "지금 이 순간의 거룩=집중 상태로 하루를 연다.",
+        "one_thing": urgent,
+        "one_thing_why": "마감/우선순위 기준 자동 선정 (Gemini 폴백).",
+        "holiness_line": "여호와를 경외하는 것이 지혜의 근본.",
+        "stuck_coaching": f"가장 비어있는 영역: {', '.join(weakest)} — 작게 한 걸음.",
+        "trend": "",
+    }
     if llm is None:
-        # LLM 키가 없을 때도 시스템이 죽지 않게 — 결정론적 폴백
-        urgent = deadlines[0]["title"] if deadlines else "오늘의 핵심 1개를 정한다"
-        return {
-            "greeting": "지금 이 순간의 거룩=집중 상태로 하루를 연다.",
-            "one_thing": urgent,
-            "one_thing_why": "마감/우선순위 기준 자동 선정 (Gemini 키 없음).",
-            "holiness_line": "여호와를 경외하는 것이 지혜의 근본.",
-            "stuck_coaching": f"가장 비어있는 영역: {', '.join(weakest)} — 작게 한 걸음.",
-            "trend": "",
-        }
-    raw = (llm.invoke(prompt).content or "").strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1].lstrip("json").strip() if "```" in raw else raw
+        return fallback
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        start, end = raw.find("{"), raw.rfind("}")
-        return json.loads(raw[start:end + 1])
+        raw = (llm.invoke(prompt).content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].lstrip("json").strip() if "```" in raw else raw
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            start, end = raw.find("{"), raw.rfind("}")
+            return json.loads(raw[start:end + 1])
+    except Exception as e:
+        # 무효 키·쿼터·파싱 실패 등 어떤 LLM 오류여도 폴백 (cron이 죽지 않게)
+        print(f"[THINK] LLM 실패 → 결정론적 폴백: {e}")
+        return fallback
 
 
 # ── 3. ACT ──────────────────────────────────────────────────────────────────
