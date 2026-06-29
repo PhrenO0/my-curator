@@ -45,11 +45,15 @@ python -m youtube_brain "https://www.youtube.com/@channelhandle" --max 20
 # 3) 내 지식에 묻기(RAG) — 모은 영상들만 근거로 답
 python -m youtube_brain ask "HBM 투자 포인트 정리해줘"
 
-# 4) 검색 / 목록 / 통계 / 주간 다이제스트(이메일)
+# 4) 검색 / 목록 / 통계 / 비슷한영상 / 주간 다이제스트(이메일)
 python -m youtube_brain search "부동산 금리"
+python -m youtube_brain related "https://youtu.be/VIDEO_ID"
 python -m youtube_brain list
 python -m youtube_brain stats
 python -m youtube_brain digest --days 7
+
+# 5) 가장 쉽게 보기 — 자기완결형 HTML 1개로 굽기(서버 불필요, 더블클릭/폰에서 열림)
+python -m youtube_brain html        # → youtube_brain/knowledge.html
 
 # 5) 키·네트워크 없이 파이프라인 자가검증
 python -m youtube_brain selftest
@@ -106,8 +110,11 @@ youtube_brain/
 
 ## 연동된 곳 (이미 동작)
 
+- **📄 단일 HTML (가장 쉬운 접근)** — `youtube_brain/knowledge.html`. 데이터·검색·UI가
+  파일 하나에 다 들어 있어 **서버 없이 더블클릭으로** 열린다(폰에서도). `html` 명령으로 다시 굽고,
+  Actions가 매 적재마다 자동 갱신·커밋한다. GitHub Pages를 켜면 영구 URL로도 볼 수 있다.
 - **📊 대시보드** — `app/knowledge/page.tsx` (`/knowledge`). `knowledge.jsonl`을 읽어
-  카드·카테고리 필터로 보여준다. 홈(`/`) 상단 `📺 유튜브 지식` 버튼으로 이동.
+  카드·카테고리 필터·검색·RAG로 보여준다. 홈(`/`) 상단 `📺 유튜브 지식` 버튼으로 이동.
   (`next.config.ts`의 `outputFileTracingIncludes`로 Vercel 번들에 파일 포함)
 - **🔎 대시보드 검색창(의미검색 + RAG)** — `/knowledge` 상단 검색창에 질문하면,
   저장된 임베딩에 질의 임베딩(Gemini REST)을 코사인 비교해 관련 영상을 찾고,

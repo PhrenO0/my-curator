@@ -10,6 +10,7 @@ youtube_brain CLI
   python -m youtube_brain stats                      # 통계
   python -m youtube_brain digest [--days 7]          # 최근 N일 새 지식 주간 다이제스트(이메일)
   python -m youtube_brain notion [--days 7 | --all]  # 지식을 노션 DB로 동기화(NOTION_TOKEN 필요)
+  python -m youtube_brain html [-o 경로]             # 자기완결형 HTML 1개로 굽기(서버 불필요)
   python -m youtube_brain selftest                   # 오프라인 자가검증(키/네트워크 불필요)
 """
 
@@ -26,7 +27,7 @@ from .pipeline import ingest_target, ask
 from .knowledge_base import KnowledgeBase
 from . import report
 
-_COMMANDS = {"ingest", "ask", "search", "related", "list", "stats", "digest", "notion", "selftest"}
+_COMMANDS = {"ingest", "ask", "search", "related", "list", "stats", "digest", "notion", "html", "selftest"}
 
 
 def main(argv=None):
@@ -66,6 +67,8 @@ def main(argv=None):
     pno = sub.add_parser("notion", help="노션 DB로 동기화")
     pno.add_argument("--days", type=int, default=7)
     pno.add_argument("--all", action="store_true", help="전체 동기화")
+    ph = sub.add_parser("html", help="단일 HTML 굽기")
+    ph.add_argument("-o", "--out", default=None, help="출력 경로(기본 youtube_brain/knowledge.html)")
     sub.add_parser("selftest", help="오프라인 자가검증")
 
     args = p.parse_args(argv)
@@ -74,7 +77,8 @@ def main(argv=None):
         return
     {"ingest": _cmd_ingest, "ask": _cmd_ask, "search": _cmd_search,
      "related": _cmd_related, "list": _cmd_list, "stats": _cmd_stats,
-     "digest": _cmd_digest, "notion": _cmd_notion, "selftest": _cmd_selftest}[args.cmd](args)
+     "digest": _cmd_digest, "notion": _cmd_notion, "html": _cmd_html,
+     "selftest": _cmd_selftest}[args.cmd](args)
 
 
 def _cmd_ingest(args):
@@ -162,6 +166,11 @@ def _cmd_notion(args):
         return
     print(f"📔 노션 동기화 — {len(recs)}개 {'(전체)' if args.all else f'(최근 {args.days}일)'}")
     sync(recs)
+
+
+def _cmd_html(args):
+    from .export_html import run
+    run(out_path=args.out)
 
 
 # ── 오프라인 자가검증(키/네트워크 없이 DB·검색·RAG 폴백 경로 점검) ──────────────
