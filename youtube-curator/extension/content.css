@@ -1,0 +1,35 @@
+#my-curator-save-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 84px;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 24px;
+  background: #1a1a2e;
+  color: #fff;
+  font-size: 14px;
+  font-family: "Roboto", "Noto Sans KR", sans-serif;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  opacity: 0.92;
+  transition: transform 0.15s, opacity 0.15s, background 0.2s;
+}
+#my-curator-save-btn:hover {
+  transform: translateY(-2px);
+  opacity: 1;
+}
+#my-curator-save-btn[data-state="saving"] {
+  background: #4a4a6a;
+  cursor: wait;
+}
+#my-curator-save-btn[data-state="saved"] {
+  background: #1b7f4d;
+}
+#my-curator-save-btn[data-state="error"] {
+  background: #a33;
+}

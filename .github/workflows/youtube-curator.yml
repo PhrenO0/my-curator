@@ -1,0 +1,53 @@
+name: YouTube Curator
+
+on:
+  # 헤르메스 자동 수집 — 매일 06:00 / 21:00 KST
+  schedule:
+    - cron: '0 21 * * *'
+    - cron: '0 12 * * *'
+  # 크롬 확장프로그램의 저장 버튼 → repository_dispatch
+  repository_dispatch:
+    types: [youtube-save]
+  # 수동 실행 (링크를 직접 넣을 수도 있음)
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: '유튜브 URL (공백/줄바꿈 구분, 비우면 inbox+워치리스트만)'
+        required: false
+        default: ''
+
+jobs:
+  curate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install requests
+
+      - name: Run YouTube Curator Agent
+        env:
+          YT_URLS: ${{ github.event.client_payload.urls_text || github.event.inputs.urls }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GEMINI_MODEL: gemini-2.5-flash
+        run: |
+          python youtube-curator/agent.py
+          python youtube-curator/agent.py --backfill
+
+      - name: Commit and Push Notes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git add vault/ youtube-curator/history.json youtube-curator/inbox.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "youtube-curator: collect notes" && git push)

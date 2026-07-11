@@ -1,0 +1,40 @@
+{
+  "system": "youtube-curator",
+  "version": 1,
+  "created": "2026-07-10",
+  "owner": "준상 오 (junsang)",
+  "timezone": "Asia/Seoul",
+  "vault_dir": "vault",
+  "notes_folder": "YouTube",
+  "obsidian_vault_name": "MyVault",
+  "notion": {
+    "gtd_page_url": "https://app.notion.com/p/30bb9019035780a6867fd054af6a35f2",
+    "database_id": "9f6d921ba2664c2e8a9f737903c2c8d9",
+    "database_url": "https://app.notion.com/p/9f6d921ba2664c2e8a9f737903c2c8d9",
+    "data_source_id": "f28abd39-6e00-448e-8978-e79dcbbcc69e"
+  },
+  "hermes": {
+    "enabled": true,
+    "max_per_channel": 3,
+    "keywords_global": [],
+    "watchlist": [
+      {
+        "name": "(예시 — channel_id 를 채우고 enabled 를 true 로)",
+        "channel_id": "",
+        "keywords": ["AI", "마케팅"],
+        "enabled": false
+      }
+    ]
+  },
+  "domains": [
+    "✝️ 영성·내면",
+    "🧠 정신·심리",
+    "🫀 신체·건강",
+    "📚 지성·성장",
+    "🤝 관계·사랑",
+    "💼 일·소명",
+    "💰 재정·경제",
+    "🎨 창조·표현",
+    "🔁 환경·일상"
+  ]
+}

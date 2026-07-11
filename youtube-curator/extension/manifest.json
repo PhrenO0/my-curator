@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "My Curator — YouTube → Obsidian",
+  "version": "1.0.0",
+  "description": "유튜브 영상을 원클릭으로 옵시디언 노트 + 노션 GTD 대시보드에 저장 (헤르메스 파이프라인 연동)",
+  "permissions": ["storage", "contextMenus", "tabs", "notifications"],
+  "host_permissions": ["https://api.github.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "My Curator — 유튜브 저장"
+  },
+  "options_page": "options.html"
+}

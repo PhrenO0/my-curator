@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>My Curator 설정</title>
+  <style>
+    body { max-width: 560px; margin: 40px auto; font-family: "Noto Sans KR", sans-serif; color: #222; }
+    h1 { font-size: 20px; }
+    label { display: block; margin: 16px 0 4px; font-weight: 600; font-size: 14px; }
+    input, select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #bbb; border-radius: 6px; font-size: 14px; }
+    small { color: #667; }
+    button { margin-top: 20px; padding: 10px 24px; border: 0; border-radius: 8px; background: #4f6ef7; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+    #saved { margin-left: 10px; color: #2e8b6e; }
+    .box { background: #f4f5fa; border-radius: 10px; padding: 14px 18px; font-size: 13px; margin-top: 24px; line-height: 1.7; }
+    code { background: #e8e9f2; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>🗂️ My Curator 설정</h1>
+
+  <label>저장 방식</label>
+  <select id="mode">
+    <option value="both">둘 다 (옵시디언 즉시 + GitHub 파이프라인)</option>
+    <option value="obsidian">옵시디언만 (obsidian:// 로컬 저장)</option>
+    <option value="github">GitHub 파이프라인만 (노션 동기화 포함)</option>
+  </select>
+
+  <label>옵시디언 볼트 이름</label>
+  <input id="vault" placeholder="MyVault" />
+  <small>옵시디언 좌측 하단에 표시되는 볼트 이름과 정확히 같아야 합니다.</small>
+
+  <label>노트 폴더</label>
+  <input id="folder" placeholder="YouTube" />
+
+  <label>GitHub 저장소</label>
+  <input id="ghRepo" placeholder="PhrenO0/my-curator" />
+
+  <label>GitHub 토큰 (Fine-grained PAT)</label>
+  <input id="ghToken" type="password" placeholder="github_pat_..." />
+  <small>이 저장소에 대해 <code>Contents: Read and write</code> 권한만 있으면 됩니다.
+  저장 버튼을 누르면 저장소에 <code>youtube-save</code> 이벤트를 보내고,
+  GitHub Actions 가 메타데이터 수집 → <code>vault/</code> 노트 커밋 → 노션 GTD 동기화를 수행합니다.</small>
+
+  <br /><button id="save">저장</button><span id="saved"></span>
+
+  <div class="box">
+    <b>연동 상태 한눈에 보기</b><br />
+    📺 노션 대시보드: <a href="https://app.notion.com/p/9f6d921ba2664c2e8a9f737903c2c8d9" target="_blank">YouTube Curator DB</a><br />
+    🚎 GTD 페이지: <a href="https://app.notion.com/p/30bb9019035780a6867fd054af6a35f2" target="_blank">Getting Things Done</a><br />
+    🤖 헤르메스 자동 수집: <code>youtube-curator/config.json</code> 의 watchlist 에 채널을 추가하세요.
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
