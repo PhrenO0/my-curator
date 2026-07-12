@@ -115,6 +115,25 @@ def build():
         {f'<div style="margin-top:10px;font-size:13px;color:#94a3b8">{esc(one["domain"])} · {esc(one.get("energy"))} · {one.get("min",0)}분</div>' if one else ""}''',
         "background:linear-gradient(135deg,#f59e0b22,#1e293b 60%);border:1px solid #f59e0b55"))
 
+    # 💡 깨달음 자산 (일기 → 원칙 → 오늘)
+    ins = state.get("insights", [])
+    if ins:
+        recent = list(reversed(ins[-5:]))
+        cats = {}
+        for i2 in ins:
+            cats[i2.get("category", "기타")] = cats.get(i2.get("category", "기타"), 0) + 1
+        cat_line = " · ".join(f"{k} {v}" for k, v in sorted(cats.items(), key=lambda x: -x[1]))
+        rows = "".join(
+            f'<div style="padding:10px 0;border-bottom:1px solid #33415555">'
+            f'<div style="font-weight:700">{esc(i2.get("title",""))} '
+            f'<span style="font-size:12px;color:#94a3b8">· {esc(i2.get("category",""))} · {esc(i2.get("date",""))}</span></div>'
+            f'<div style="color:#cbd5e1;font-size:13px;line-height:1.6;margin-top:4px">“{esc(i2.get("key",""))}”</div>'
+            f'<div style="color:#86efac;font-size:12px;margin-top:4px">→ {esc(i2.get("action",""))}</div></div>'
+            for i2 in recent)
+        parts.append(card(
+            H.format(f"💡 깨달음 자산 · {len(ins)}") + rows +
+            f'<div style="margin-top:10px;font-size:12px;color:#94a3b8">{cat_line}</div>'))
+
     # 커리어맵
     if cm:
         parts.append(card(

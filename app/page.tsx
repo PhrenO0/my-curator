@@ -106,6 +106,12 @@ export default function Page() {
   const wheelAvg = (wheel.reduce((s, w) => s + w.score, 0) / (wheel.length || 1)).toFixed(1);
   const wheelLow = [...wheel].sort((a, b) => a.score - b.score).slice(0, 2);
 
+  // 💡 깨달음 자산 (일기 → 원칙 → 오늘)
+  const insights = ((state as unknown as {
+    insights?: { date: string; title: string; category: string; key: string; action: string }[];
+  }).insights ?? []);
+  const recentInsights = [...insights].slice(-4).reverse();
+
   // 커리어맵 v2
   const cm = (state.goals as unknown as { career_map?: any }).career_map;
   const cmYearKey: string | undefined = cm?.skill_tree
@@ -166,6 +172,32 @@ export default function Page() {
           </div>
         )}
       </section>
+
+      {/* 💡 깨달음 자산 */}
+      {recentInsights.length > 0 && (
+        <section style={{ ...card, border: "1px solid #86efac33" }}>
+          <h2 style={h2}>💡 깨달음 자산 · {insights.length}</h2>
+          {recentInsights.map((it) => (
+            <div
+              key={it.date + it.title}
+              style={{ padding: "10px 0", borderBottom: "1px solid #33415555" }}
+            >
+              <div style={{ fontWeight: 700 }}>
+                {it.title}{" "}
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>
+                  · {it.category} · {it.date}
+                </span>
+              </div>
+              <div style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.6, marginTop: 4 }}>
+                “{it.key}”
+              </div>
+              <div style={{ color: "#86efac", fontSize: 12, marginTop: 4 }}>
+                → {it.action}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* 커리어맵 v2 */}
       {cm && (

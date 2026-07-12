@@ -51,6 +51,45 @@ def pull_live_activities(database_id):
     return out
 
 
+def create_insight(data_source_id, entry):
+    """깨달음 DB에 엔트리 1건 생성. entry: {date,title,category,key,action,notion_src,source}"""
+    props = {
+        "이름": {"title": [{"text": {"content": entry.get("title", "")}}]},
+        "날짜": {"date": {"start": entry.get("date")}},
+        "카테고리": {"select": {"name": entry.get("category", "정체성")}},
+        "핵심 문장": {"rich_text": [{"text": {"content": entry.get("key", "")}}]},
+        "적용 액션": {"rich_text": [{"text": {"content": entry.get("action", "")}}]},
+        "출처": {"select": {"name": entry.get("source", "세션")}},
+    }
+    if entry.get("notion_src"):
+        props["원본"] = {"url": entry["notion_src"]}
+    body = {"parent": {"type": "data_source_id", "data_source_id": data_source_id}, "properties": props}
+    r = requests.post(f"{API}/pages", headers=_auth(), json=body, timeout=30)
+    r.raise_for_status()
+    return r.json().get("id")
+
+
+def pull_insights(data_source_id, limit=30):
+    """깨달음 DB를 읽어 compact 리스트로 (최신순)."""
+    r = requests.post(f"{API}/data_sources/{data_source_id}/query",
+                      headers=_auth(),
+                      json={"page_size": limit,
+                            "sorts": [{"property": "날짜", "direction": "descending"}]},
+                      timeout=30)
+    r.raise_for_status()
+    out = []
+    for page in r.json().get("results", []):
+        p = page.get("properties", {})
+        out.append({
+            "title": "".join(t.get("plain_text", "") for t in p.get("이름", {}).get("title", [])),
+            "date": (p.get("날짜", {}).get("date") or {}).get("start"),
+            "category": _select(p.get("카테고리")),
+            "key": "".join(t.get("plain_text", "") for t in p.get("핵심 문장", {}).get("rich_text", [])),
+            "action": "".join(t.get("plain_text", "") for t in p.get("적용 액션", {}).get("rich_text", [])),
+        })
+    return out
+
+
 def log_one_thing(hub_page_id, today, brief):
     """허브 페이지 끝에 '오늘의 단 하나'를 한 줄 기록(append, 안전)."""
     wd = ["월", "화", "수", "목", "금", "토", "일"][today.weekday()]

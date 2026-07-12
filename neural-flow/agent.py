@@ -113,6 +113,16 @@ def build_prompt(state, today, deadlines, balance_counts, weakest, mode):
     v = state["vision"]
     weekday = ["월", "화", "수", "목", "금", "토", "일"][today.weekday()]
     activities = [a for a in state.get("activities", []) if a.get("status") != "완료"]
+    # 최근 깨달음 1개 — 일기에서 나온 원칙을 오늘 설계에 주입 (없으면 무시, graceful)
+    insights = state.get("insights", [])
+    latest_insight = insights[-1] if insights else None
+    insight_line = ""
+    if latest_insight:
+        insight_line = (
+            f"\n[최근 깨달음] \"{latest_insight.get('key','')}\" (— {latest_insight.get('title','')})"
+            f"\n[깨달음 적용 액션] {latest_insight.get('action','')}"
+            "\n위 깨달음이 오늘 설계(one_thing 선정·코칭 톤)에 자연스럽게 반영되게 하라.\n"
+        )
     extra = ""
     if mode == "weekly":
         extra = (
@@ -135,7 +145,7 @@ def build_prompt(state, today, deadlines, balance_counts, weakest, mode):
 [가장 비어있는 영역] {weakest}
 [메일에서 챙길 것] {json.dumps(state.get("inbox_flags", []), ensure_ascii=False)}
 [미완료 활동] {json.dumps(activities, ensure_ascii=False)}
-{extra}
+{insight_line}{extra}
 원칙: 과확장 금지. '오늘의 단 하나'는 무조건 1개. 마감 임박 > 고가치 > 영성 순. 신앙은 진지하게.
 
 아래 JSON 만 출력하라(코드펜스 금지):
