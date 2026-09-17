@@ -1,16 +1,22 @@
-name: Daily AI Curator
+name: YouTube Brain — Ingest
 
 on:
-  schedule:
-    - cron: '0 23,4,10 * * *'
   workflow_dispatch:
+    inputs:
+      target:
+        description: '유튜브 링크 또는 키워드'
+        required: true
+      max:
+        description: '키워드 검색 시 최대 영상 수'
+        required: false
+        default: '3'
 
 jobs:
-  run-curator:
+  ingest:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,32 +31,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Curator Main Script
+      - name: Ingest into Knowledge DB
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GEMINI_MODEL: gemini-2.5-flash
-          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
-          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          # 셸 인젝션 방지를 위해 입력은 env 로만 전달
+          TARGET: ${{ github.event.inputs.target }}
+          MAXN: ${{ github.event.inputs.max }}
         run: |
-          python curator_bot.py
+          python -m youtube_brain ingest "$TARGET" --max "$MAXN"
 
-      - name: Sync new videos to Notion (NOTION_TOKEN 있을 때만)
+      - name: Sync to Notion (NOTION_TOKEN 있을 때만)
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           YT_BRAIN_NOTION_DB: ${{ secrets.YT_BRAIN_NOTION_DB }}
         run: |
-          python -m youtube_brain notion --days 3
+          python -m youtube_brain notion --days 1
 
       - name: Build single-file HTML
         run: |
           python -m youtube_brain html
 
-      - name: Commit and Push History
+      - name: Commit Knowledge
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add history.json youtube_brain/knowledge.jsonl youtube_brain/knowledge.html
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update scraping history + 유튜브 지식 적재" && git push)
+          git add youtube_brain/knowledge.jsonl youtube_brain/knowledge.html
+          git diff --quiet && git diff --staged --quiet || (git commit -m "youtube-brain: 지식 추가" && git push)

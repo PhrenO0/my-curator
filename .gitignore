@@ -39,6 +39,12 @@ neural-flow/job_input.json
 neural-flow/embeddings_cache.json
 neural-flow/dashboard.html
 
+# youtube_brain (정본은 knowledge.jsonl — 아래 DB/미리보기/캐시만 무시)
+youtube_brain/knowledge.db
+youtube_brain/*_preview.html
+youtube_brain/*_cache.json
+youtube_brain/notion.json
+
 # python
 __pycache__/
 *.pyc

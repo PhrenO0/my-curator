@@ -1,0 +1,174 @@
+"""
+youtube_brain · 단일 HTML 내보내기
+==================================
+지식DB를 **자기완결형 HTML 파일 하나**로 굽는다(데이터·검색·UI 전부 내장).
+서버·빌드 없이 더블클릭으로 열리고(파일 또는 폰), 검색·카테고리·비슷한영상까지 동작.
+
+실행:  python -m youtube_brain html [-o 경로]
+출력:  youtube_brain/knowledge.html (기본)
+"""
+
+import os
+import json
+
+from .config import HERE, now_kst_iso
+from .knowledge_base import KnowledgeBase
+
+OUT_PATH = os.path.join(HERE, "knowledge.html")
+
+
+def _compact(r, related):
+    """HTML 에 실을 가벼운 레코드(임베딩 제외, 비슷한영상은 미리 계산)."""
+    return {
+        "video_id": r.get("video_id", ""),
+        "url": r.get("url", ""),
+        "title": r.get("title", ""),
+        "channel": r.get("channel", ""),
+        "duration_sec": r.get("duration_sec", 0),
+        "views": r.get("views", 0),
+        "one_liner": r.get("one_liner", ""),
+        "tl_dr": r.get("tl_dr", []),
+        "takeaways": r.get("takeaways", []),
+        "keywords": r.get("keywords", []),
+        "summary": r.get("summary", ""),
+        "category": r.get("category", "기타"),
+        "note": r.get("note", ""),
+        "created_at": r.get("created_at", ""),
+        "related": related,
+    }
+
+
+def build_html(records):
+    data_json = json.dumps(records, ensure_ascii=False)
+    return (TEMPLATE
+            .replace("/*__DATA__*/null", data_json)
+            .replace("__COUNT__", str(len(records)))
+            .replace("__GENERATED__", now_kst_iso()))
+
+
+def run(out_path=None, kb=None):
+    kb = kb or KnowledgeBase()
+    recs = kb.all_records()
+    compact = []
+    for r in recs:
+        related = [{"title": x.get("title", ""), "url": x.get("url", "")}
+                   for x in kb.related(r["video_id"], k=3)]
+        compact.append(_compact(r, related))
+    out = out_path or OUT_PATH
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(build_html(compact))
+    print(f"[html] {len(compact)}개 지식 → {out} (브라우저로 바로 열기)")
+    return out
+
+
+TEMPLATE = r"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>📺 유튜브 지식</title>
+<style>
+  :root{ --bg:#0f172a; --card:#1e293b; --line:#334155; --fg:#e2e8f0; --mut:#94a3b8; --acc:#38bdf8; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--fg); line-height:1.6;
+        font-family:'Apple SD Gothic Neo','Malgun Gothic','Segoe UI',sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:820px; margin:0 auto; padding:28px 16px 64px; }
+  h1{ font-size:24px; margin:6px 0 2px; }
+  .sub{ color:var(--mut); margin:0 0 18px; }
+  .search{ display:flex; gap:8px; margin-bottom:14px; }
+  .search input{ flex:1; background:#0f172a; border:1px solid var(--line); border-radius:10px;
+                 padding:11px 14px; color:var(--fg); font-size:15px; }
+  .search input::placeholder{ color:#64748b; }
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+  .chip{ padding:6px 12px; border-radius:999px; font-size:13px; cursor:pointer; user-select:none;
+         background:#0f172a; border:1px solid var(--line); color:var(--mut); }
+  .chip.on{ color:var(--fg); }
+  .card{ background:var(--card); border-radius:16px; padding:18px 20px; margin-bottom:14px; }
+  .crow{ display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+  .title{ color:var(--fg); font-weight:700; font-size:17px; text-decoration:none; }
+  .title:hover{ color:var(--acc); }
+  .cat{ font-size:12px; white-space:nowrap; }
+  .meta{ color:#64748b; font-size:12px; margin-top:4px; }
+  .one{ font-weight:600; margin-top:10px; }
+  ul{ margin:10px 0 0; padding-left:18px; }
+  .take{ margin-top:10px; padding:10px 12px; background:#0f172a; border-radius:10px; font-size:13px; }
+  .take b{ color:#fbbf24; display:block; margin-bottom:4px; font-size:12px; }
+  .tags{ margin-top:8px; }
+  .tag{ display:inline-block; font-size:11px; color:var(--mut); background:#0f172a; border:1px solid var(--line);
+        border-radius:999px; padding:2px 8px; margin:6px 6px 0 0; }
+  .rel{ margin-top:10px; padding-top:8px; border-top:1px solid var(--line); font-size:12px; color:var(--mut); }
+  .rel a{ color:#a78bfa; text-decoration:none; }
+  .note{ color:#64748b; font-size:12px; margin-top:8px; }
+  .empty{ background:var(--card); border-radius:16px; padding:28px; text-align:center; color:var(--mut); }
+  .empty code{ color:#cbd5e1; }
+  footer{ text-align:center; color:#475569; font-size:12px; margin-top:24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div style="color:var(--acc);font-weight:700;letter-spacing:1px">📺 YOUTUBE BRAIN</div>
+    <h1>유튜브 지식</h1>
+    <p class="sub">영상을 요약해 쌓은 나만의 지식DB · 총 <span id="count">__COUNT__</span>개 · 생성 __GENERATED__</p>
+  </header>
+  <div class="search"><input id="q" type="search" placeholder="검색 — 예: HBM 투자, 부동산 금리" autocomplete="off"></div>
+  <div class="chips" id="chips"></div>
+  <div id="cards"></div>
+  <footer>youtube_brain · 자막 → Gemini 요약 → 지식DB · 이 파일은 서버 없이 단독 동작</footer>
+</div>
+<script>window.__DATA__ = /*__DATA__*/null;</script>
+<script>
+(function(){
+  var DATA = window.__DATA__ || [];
+  var CAT = {AI:'#38bdf8','반도체':'#a78bfa','경제':'#fb923c','부동산':'#34d399','주식':'#fbbf24','창업':'#f472b6','노동시장':'#60a5fa','기타':'#94a3b8'};
+  function color(c){ return CAT[c] || '#94a3b8'; }
+  function esc(s){ var d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
+  function fmtDur(sec){ sec=Math.floor(sec||0); if(sec<=0) return ''; var h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60,p=function(n){return(n<10?'0':'')+n;}; return h? h+':'+p(m)+':'+p(s) : m+':'+p(s); }
+  function toks(s){ return (String(s||'').toLowerCase().match(/[가-힣]+|[a-z0-9]+/g)||[]).filter(function(t){return t.length>=2;}); }
+  function score(r,ts){ var hay={}; toks([r.title,r.one_liner,r.summary,(r.keywords||[]).join(' '),(r.takeaways||[]).join(' ')].join(' ')).forEach(function(t){hay[t]=1;}); var n=0; ts.forEach(function(t){ if(hay[t]) n++; }); return n; }
+
+  var q='', cat='';
+
+  function card(r){
+    var c=color(r.category), h='';
+    var meta=[r.channel, fmtDur(r.duration_sec), r.views? '조회 '+Number(r.views).toLocaleString():''].filter(Boolean).join(' · ');
+    h+='<section class="card" style="border-left:3px solid '+c+'">';
+    h+='<div class="crow"><a class="title" href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.title||'(제목 없음)')+' ↗</a><span class="cat" style="color:'+c+'">'+esc(r.category)+'</span></div>';
+    if(meta) h+='<div class="meta">'+esc(meta)+'</div>';
+    if(r.one_liner) h+='<div class="one">💡 '+esc(r.one_liner)+'</div>';
+    if(r.tl_dr&&r.tl_dr.length) h+='<ul>'+r.tl_dr.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>';
+    if(r.takeaways&&r.takeaways.length) h+='<div class="take"><b>💼 시사점</b>'+r.takeaways.map(function(t){return '<div>→ '+esc(t)+'</div>';}).join('')+'</div>';
+    if(r.keywords&&r.keywords.length) h+='<div class="tags">'+r.keywords.map(function(k){return '<span class="tag">#'+esc(k)+'</span>';}).join('')+'</div>';
+    if(r.related&&r.related.length) h+='<div class="rel">🔗 비슷한 영상: '+r.related.map(function(x){return '<a href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(String(x.title||'').slice(0,24))+'</a>';}).join(' · ')+'</div>';
+    if(r.note) h+='<div class="note">⚠️ '+esc(r.note)+'</div>';
+    h+='</section>';
+    return h;
+  }
+
+  function render(){
+    var ts=toks(q), list=DATA.slice();
+    if(cat) list=list.filter(function(r){ return (r.category||'기타')===cat; });
+    if(ts.length){ list=list.map(function(r){return {r:r,s:score(r,ts)};}).filter(function(x){return x.s>0;}).sort(function(a,b){return b.s-a.s;}).map(function(x){return x.r;}); }
+    else { list.sort(function(a,b){ return String(b.created_at).localeCompare(String(a.created_at)); }); }
+    document.getElementById('count').textContent=list.length;
+    document.getElementById('cards').innerHTML = list.length ? list.map(card).join('')
+      : '<div class="empty">아직 쌓인 지식이 없습니다.<br><br><code>python -m youtube_brain "유튜브링크 또는 키워드"</code><br>로 영상을 추가한 뒤 <code>python -m youtube_brain html</code> 로 다시 구우세요.</div>';
+  }
+
+  function chips(){
+    var counts={}; DATA.forEach(function(r){ var k=r.category||'기타'; counts[k]=(counts[k]||0)+1; });
+    var cats=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];});
+    var el=document.getElementById('chips'), html='';
+    html+='<span class="chip'+(cat===''?' on':'')+'" data-cat="" style="'+(cat===''?'border-color:#38bdf899;background:#38bdf833':'')+'">전체 <b>'+DATA.length+'</b></span>';
+    cats.forEach(function(c){ var on=cat===c, col=color(c); html+='<span class="chip'+(on?' on':'')+'" data-cat="'+esc(c)+'" style="'+(on?'border-color:'+col+'99;background:'+col+'33':'')+'">'+esc(c)+' <b style="color:'+col+'">'+counts[c]+'</b></span>'; });
+    el.innerHTML=html;
+    [].forEach.call(el.querySelectorAll('.chip'), function(ch){ ch.onclick=function(){ cat=ch.getAttribute('data-cat'); chips(); render(); }; });
+  }
+
+  document.getElementById('q').addEventListener('input', function(e){ q=e.target.value; render(); });
+  chips(); render();
+})();
+</script>
+</body>
+</html>
+"""

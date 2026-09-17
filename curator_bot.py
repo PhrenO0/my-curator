@@ -118,6 +118,29 @@ def generate_html_report(finance_data, curated_results):
     html += "</body></html>"
     return html
 
+def archive_to_knowledge(curated, max_videos=5):
+    """큐레이션에 뽑힌 유튜브 영상을 youtube_brain 지식DB에 자동 적재(선택·안전).
+    YT_BRAIN_ARCHIVE=0 으로 끌 수 있고, 실패해도 큐레이터 본류는 멈추지 않는다."""
+    if os.environ.get("YT_BRAIN_ARCHIVE", "1").lower() in ("0", "false", "no"):
+        return
+    links = [c.get("original_link", "") for c in curated
+             if "youtube.com" in c.get("original_link", "") or "youtu.be" in c.get("original_link", "")]
+    links = links[:max_videos]
+    if not links:
+        return
+    try:
+        from youtube_brain.pipeline import ingest_target
+    except Exception as e:
+        print(f"[curator] youtube_brain 임포트 실패 — 지식 적재 건너뜀: {e}")
+        return
+    print(f"[curator] 큐레이션된 유튜브 {len(links)}개를 지식DB에 적재…")
+    for link in links:
+        try:
+            ingest_target(link)
+        except Exception as e:
+            print(f"[curator] 적재 실패({link}): {e}")
+
+
 def run_curator():
     print("🚀 Starting Daily Curator Process...")
     finance_data = get_stock_summary(["^KS11", "^KQ11", "AAPL", "TSLA", "005930.KS"])
@@ -139,7 +162,10 @@ def run_curator():
     for c in curated:
         if c.get("original_link"): new_hist.append(c["original_link"])
     save_history(new_hist)
-    
+
+    # 큐레이션된 유튜브 영상을 '내 지식'으로 자동 축적
+    archive_to_knowledge(curated)
+
     sender = os.environ.get("SENDER_EMAIL")
     password = os.environ.get("SENDER_PASSWORD")
     if sender and password:

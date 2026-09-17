@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import state from "@/neural-flow/state.json";
 
 // 항상 '오늘' 기준으로 새로 렌더 (Vercel에서 요청 시 계산)
@@ -143,6 +144,36 @@ export default function Page() {
         <p style={{ color: "#94a3b8", margin: 0, lineHeight: 1.6 }}>
           {state.vision.core_axis}
         </p>
+        <nav style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <Link
+            href="/knowledge"
+            style={{
+              fontSize: 13,
+              textDecoration: "none",
+              color: "#38bdf8",
+              background: "#38bdf81a",
+              border: "1px solid #38bdf855",
+              borderRadius: 999,
+              padding: "5px 12px",
+            }}
+          >
+            📺 유튜브 지식
+          </Link>
+          <Link
+            href="/portfolio"
+            style={{
+              fontSize: 13,
+              textDecoration: "none",
+              color: "#94a3b8",
+              background: "#0f172a",
+              border: "1px solid #334155",
+              borderRadius: 999,
+              padding: "5px 12px",
+            }}
+          >
+            🗂️ 포트폴리오
+          </Link>
+        </nav>
       </header>
 
       {/* 오늘의 단 하나 */}
