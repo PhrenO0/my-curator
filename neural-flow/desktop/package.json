@@ -7,16 +7,31 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "check": "node --check main/main.js && node --check main/store.js && node --check main/brain.js && node --check main/calendar.js && node --check main/news.js && node --check main/scheduler.js && node --check preload.js"
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node test/e2e/launch.js",
+    "check": "node -e \"for (const f of require('fs').readdirSync('main')) require('child_process').execFileSync(process.execPath, ['--check', 'main/' + f])\" && node --check preload.js"
   },
   "author": "junsang",
   "license": "MIT",
   "build": {
     "appId": "com.junsang.neuralflow",
     "productName": "neural-flow",
-    "files": ["main/**", "renderer/**", "preload.js", "assets/**", "package.json"],
-    "win": { "target": "nsis", "icon": "assets/icon.png" },
-    "mac": { "target": "dmg", "icon": "assets/icon.png", "category": "public.app-category.productivity" }
+    "files": [
+      "main/**",
+      "renderer/**",
+      "preload.js",
+      "assets/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.png",
+      "category": "public.app-category.productivity"
+    }
   },
   "dependencies": {
     "node-ical": "^0.27.2",

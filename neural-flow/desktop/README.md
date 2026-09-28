@@ -95,6 +95,16 @@ desktop/
 데이터 파일 위치: Electron `userData` 폴더의 `neural-flow.json`
 (Windows `%APPDATA%/neural-flow-desktop`, macOS `~/Library/Application Support/neural-flow-desktop`).
 
+## 테스트
+
+```bash
+npm test            # 단위 테스트 22개 (일정 계산·브리핑 폴백·Gemini 파싱·ICS·저장소·스케줄러)
+npm run test:e2e    # 실제 Electron 앱을 띄워 IPC 경로 21개 검증 (가짜 Gemini·ICS·RSS 로컬 서버, 네트워크 불필요)
+NF_SHOT_DIR=./shots npm run test:e2e   # 화면 캡처도 저장
+```
+
+Linux 에서 화면이 없으면 `xvfb-run -a npm run test:e2e`. PR 마다 `.github/workflows/desktop-ci.yml` 이 같은 순서로 돌린다.
+
 ## 배포용 설치 파일 만들기 (선택)
 
 로그인 자동 실행은 Windows는 개발 실행(`npm start`)에서도 동작하고, macOS는 설치 파일로 패키징해야 동작한다.

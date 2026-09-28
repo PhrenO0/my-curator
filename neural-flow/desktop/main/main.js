@@ -32,7 +32,7 @@ const PRELOAD = path.join(ROOT, 'preload.js')
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
 const DEV = process.argv.includes('--dev')
-const SHOT = process.env.NF_SCREENSHOT // 개발용: 캡처 스크립트 경로 (화면 확인 후 종료)
+const TEST_HOOK = process.env.NF_TEST_HOOK // 테스트용: E2E 스크립트 경로 (스케줄러를 끄고 스크립트가 앱을 조작)
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -67,7 +67,7 @@ function getKey() {
   }
   if (s.geminiKeyPlain) return { key: s.geminiKeyPlain, source: '앱 설정' }
   if (process.env.GOOGLE_API_KEY) return { key: process.env.GOOGLE_API_KEY, source: '환경변수' }
-  const env = readDotenvKey()
+  const env = TEST_HOOK ? '' : readDotenvKey() // 테스트 중엔 개발자 PC 의 .env 키를 읽지 않는다
   if (env) return { key: env, source: '.env 파일' }
   return { key: '', source: '' }
 }
@@ -550,11 +550,11 @@ app.whenReady().then(async () => {
   globalShortcut.register('CommandOrControl+Alt+M', () => openManager())
 
   const scheduler = createScheduler(store, jobs)
-  if (!SHOT) scheduler.start()
+  if (!TEST_HOOK) scheduler.start()
   // 절전 복귀·화면 구성 변경 시 날짜/위치 갱신
   powerMonitor.on('resume', () => scheduler.tick())
   screen.on('display-removed', () => createWidget())
 
   if (DEV) openManager('today')
-  if (SHOT) require(path.resolve(SHOT)).run({ app, store, getWidget: () => widget, openManager, getManager: () => manager, setWidgetMode, jobs })
+  if (TEST_HOOK) require(path.resolve(TEST_HOOK)).run({ app, store, getWidget: () => widget, openManager, getManager: () => manager, setWidgetMode, jobs })
 })

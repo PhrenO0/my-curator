@@ -1,0 +1,56 @@
+name: neural-flow desktop CI
+
+on:
+  pull_request:
+    paths:
+      - 'neural-flow/desktop/**'
+      - 'neural-flow/state.json'
+      - '.github/workflows/desktop-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'neural-flow/desktop/**'
+      - '.github/workflows/desktop-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: neural-flow/desktop
+    env:
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: neural-flow/desktop/package-lock.json
+
+      - name: Install
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          npm ci
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: E2E (Electron + 가상 디스플레이)
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" npm run test:e2e
+        env:
+          NF_SHOT_DIR: ${{ github.workspace }}/e2e-shots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: e2e-shots
+          if-no-files-found: ignore
