@@ -1,0 +1,29 @@
+{
+  "name": "neural-flow-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "neural-flow 데스크탑 — 바탕화면 반투명 캘린더 위젯 + 일정 관리 + 브리핑 비서",
+  "main": "main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "check": "node --check main/main.js && node --check main/store.js && node --check main/brain.js && node --check main/calendar.js && node --check main/news.js && node --check main/scheduler.js && node --check preload.js"
+  },
+  "author": "junsang",
+  "license": "MIT",
+  "build": {
+    "appId": "com.junsang.neuralflow",
+    "productName": "neural-flow",
+    "files": ["main/**", "renderer/**", "preload.js", "assets/**", "package.json"],
+    "win": { "target": "nsis", "icon": "assets/icon.png" },
+    "mac": { "target": "dmg", "icon": "assets/icon.png", "category": "public.app-category.productivity" }
+  },
+  "dependencies": {
+    "node-ical": "^0.27.2",
+    "pretendard": "^1.3.9",
+    "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5"
+  }
+}

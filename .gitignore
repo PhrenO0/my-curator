@@ -39,6 +39,10 @@ neural-flow/job_input.json
 neural-flow/embeddings_cache.json
 neural-flow/dashboard.html
 
+# neural-flow desktop (Electron)
+neural-flow/desktop/node_modules/
+neural-flow/desktop/dist/
+
 # python
 __pycache__/
 *.pyc
