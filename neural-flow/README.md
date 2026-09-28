@@ -95,6 +95,10 @@
 3. **헤르메스(텔레그램) cron** — 준상이 이미 쓰는 지속 에이전트가 자동화의 최적지.
    `AUTOMATION.md` 의 cron 레시피 참고.
 
+4. **데스크탑 앱 (로컬 상시 비서)** — `desktop/`. 바탕화면에 붙는 반투명 캘린더 위젯 +
+   일정·활동 보드 + 아침 브리핑·최신 정보·영어 회화. 이 에이전트 루프를 PC 안에서 돌린다.
+   `cd neural-flow/desktop && npm install && npm start` → 자세한 건 `desktop/README.md`.
+
 > 핵심 ID(노션 페이지/DB/뷰, 캘린더)는 모두 `config.json` 에 있다.
 > 에이전트는 항상 거기서 위치를 읽는다.
 
@@ -128,8 +132,9 @@ neural-flow/
 │   ├── cover-letter-customizer.md ← 자소서 커스터마이저 프롬프트 + 엔진 사용법
 │   ├── decision-journal.md        ← 결정 일지 Pre-mortem 프롬프트(과확장 처방)
 │   └── hermes-tracking.md         ← 헤르메스 양방향 추적 스킬/cron
-└── workflows/
-    └── weekly-recommend.workflow.js  ← (선택) 주간 추천 워크플로우 스크립트
+├── workflows/
+│   └── weekly-recommend.workflow.js  ← (선택) 주간 추천 워크플로우 스크립트
+└── desktop/                       ← ★ 데스크탑 앱 (Electron) — 바탕화면 위젯 + 일정 관리 + 브리핑
 
 .github/workflows/neural-flow.yml  ← 데일리·위클리 cron (curator 와 동일 구조)
 ```
