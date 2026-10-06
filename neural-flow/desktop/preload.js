@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('nf', {
   saveActivity: call('nf:activity:save'),
   deleteActivity: call('nf:activity:delete'),
   setActivityStatus: call('nf:activity:status'),
+  archiveStale: call('nf:activity:archive-stale'),
   toggleOccurrence: call('nf:occurrence:toggle'),
   toggleOneThing: call('nf:onething:toggle'),
   setOneThing: call('nf:onething:set'),

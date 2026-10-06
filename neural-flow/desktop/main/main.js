@@ -674,6 +674,19 @@ function registerIpc() {
   ipcMain.handle('nf:activity:delete', (_e, id) =>
     store.update((d) => (d.activities = d.activities.filter((x) => x.id !== id)))
   )
+  // 날짜가 지난 미완료 활동 → 보류 (지우지 않는다)
+  ipcMain.handle('nf:activity:archive-stale', () => {
+    const today = A.ymd(new Date())
+    let n = 0
+    store.update((d) => {
+      for (const a of d.activities)
+        if (a.date && a.date < today && a.status !== '완료' && a.status !== '보류') {
+          a.status = '보류'
+          n++
+        }
+    })
+    return n
+  })
   ipcMain.handle('nf:activity:status', (_e, id, status) =>
     store.update((d) => {
       const a = d.activities.find((x) => x.id === id)

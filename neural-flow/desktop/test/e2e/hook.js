@@ -280,6 +280,11 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, t
     s = await snap()
     check('반복 일정은 날짜별로 완료', !!s.doneMap[routine.key])
 
+    const stale = s.activities.filter((a) => a.date && a.date < today && !['완료', '보류'].includes(a.status)).length
+    const moved = await js('nf.archiveStale()')
+    s = await snap()
+    check('지난 활동 정리 → 보류 (삭제 안 함)', moved === stale && moved > 0 && !s.activities.some((a) => a.date && a.date < today && !['완료', '보류'].includes(a.status)), `${moved}개`)
+
     // ── 9) 화면 ──
     await js("location.hash = 'calendar'")
     await wait(400)

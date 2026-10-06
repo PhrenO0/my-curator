@@ -375,6 +375,10 @@ function viewBoard() {
   return `
   <div class="page-h">
     <div class="titles"><div class="eyebrow">제안 → 승인 → 예정(캘린더) → 진행 → 완료</div><h1>활동 보드</h1></div>
+    ${(() => {
+      const n = S.activities.filter((a) => a.date && a.date < S.today && !['완료', '보류'].includes(a.status)).length
+      return n ? `<button class="btn sm" data-act="archive-stale" title="날짜가 지난 미완료 활동을 보류로">${icon('hourglass', 13)}지난 활동 ${n}개 정리</button>` : ''
+    })()}
     <button class="btn sm" data-act="run" data-job="weekly" ${S.busy.brief ? 'disabled' : ''}>${icon('sparkles', 13, S.busy.brief ? 'spin' : '')}주간 추천 받기</button>
     <button class="btn sm primary" data-act="new-activity">${icon('plus', 14)}활동 추가</button>
   </div>
@@ -805,6 +809,10 @@ document.addEventListener('click', async (e) => {
       return activityModal({})
     case 'edit-activity':
       return activityModal(S.activities.find((a) => a.id === d.id))
+    case 'archive-stale': {
+      const n = await nf.archiveStale()
+      return toast(`${n}개를 보류로 옮겼어요 (보류 칸에서 되살릴 수 있어요)`)
+    }
     case 'filter':
       boardFilter = d.d
       return render()
