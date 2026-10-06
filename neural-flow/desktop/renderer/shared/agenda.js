@@ -109,8 +109,12 @@
         start: r.start,
         end: r.end,
         domain: r.calendar || '',
-        color: REMOTE_COLOR,
+        color: r.color || REMOTE_COLOR,
         location: r.location || '',
+        link: r.link || '',
+        source: r.source || 'ics',
+        calendarId: r.calendarId || null,
+        eventId: r.eventId || null,
         done: false,
       })
     }

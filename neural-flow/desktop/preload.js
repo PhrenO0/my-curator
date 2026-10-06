@@ -20,6 +20,17 @@ contextBridge.exposeInMainWorld('nf', {
   openLink: call('nf:link'),
   resizeWidget: call('nf:widget:resize'),
   setWidgetMode: call('nf:widget:mode'),
+  // 로그인
+  authConfig: call('nf:auth:config'),
+  signIn: call('nf:auth:signin'),
+  signOut: call('nf:auth:signout'),
+  // 언제든 입력
+  previewInput: call('nf:input:preview'),
+  commitInput: call('nf:input:commit'),
+  hideQuick: call('nf:quick:hide'),
+  openQuick: call('nf:quick:open'),
+  deleteGoogleEvent: call('nf:google:delete'),
+  detectEngine: call('nf:engine:detect'),
   onChange: (fn) => {
     const h = () => fn()
     ipcRenderer.on('nf:changed', h)

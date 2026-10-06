@@ -10,6 +10,8 @@ let tab = localStorage.getItem('nf.widget.tab') || 'english'
 
 async function refresh() {
   S = await nf.snapshot()
+  document.body.classList.toggle('edit', S.widgetMode === 'edit')
+  if (S.locked) return renderLocked()
   if (!selected || !view) {
     selected = S.today
     const d = A.parseYmd(S.today)
@@ -33,6 +35,7 @@ function clockCard() {
         <div class="clock-date">${A.formatKoreanDate(S.today)}</div>
       </div>
       <div class="clock-tools">
+        <button class="icon-btn" data-act="quick" title="빠른 입력 (${S.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space'})">${icon('plus', 16)}</button>
         <button class="icon-btn" data-act="refresh" title="브리핑 새로고침">${icon('refresh-cw', 15, spinning ? 'spin' : '')}</button>
         <button class="icon-btn" data-act="open" data-view="today" title="관리 창 열기">${icon('settings', 15)}</button>
       </div>
@@ -61,7 +64,7 @@ function oneThingCard() {
   }
   return `
   <section class="card">
-    <div class="card-h">${icon('target', 13)}<span class="grow">오늘의 단 하나</span>${b.source === 'fallback' ? '<span title="Gemini 키 없음 → 규칙 기반">자동 선정</span>' : ''}</div>
+    <div class="card-h">${icon('target', 13)}<span class="grow">오늘의 단 하나</span>${b.source === 'fallback' ? '<span title="AI 엔진 없음 → 규칙 기반">자동 선정</span>' : ''}</div>
     <div class="one">
       <button class="check ${b.done ? 'on' : ''}" data-act="one" aria-label="완료 표시">${icon('check', 14)}</button>
       <div>
@@ -195,6 +198,22 @@ function editBar() {
   return `<div class="edit-bar">${icon('move', 14)}<span>드래그해서 위치를 옮기세요</span><button data-act="pin">${icon('pin', 12)} 고정</button></div>`
 }
 
+// 잠금 상태: 시계만 보여주고 개인 데이터는 숨긴다
+function renderLocked() {
+  document.documentElement.style.setProperty('--glass-alpha', 0.72)
+  root.innerHTML = `
+  <section class="card">
+    <div class="clock"><div>
+      <div class="clock-time" id="clock">${A.hm(new Date())}</div>
+      <div class="clock-date">${A.formatKoreanDate(S.today)}</div>
+    </div></div>
+  </section>
+  <section class="card locked">
+    ${icon('lock', 18)}<div><b>잠겨 있어요</b><span>본인 구글 계정으로 로그인하면 일정이 보여요</span></div>
+    <button class="pill-btn" data-act="open" data-view="today">로그인</button>
+  </section>`
+}
+
 function render() {
   const occ = A.occurrences(
     { events: S.events, remote: S.remote.events || [], activities: S.activities, doneMap: S.doneMap },
@@ -218,6 +237,7 @@ root.addEventListener('click', async (e) => {
   e.preventDefault()
   const act = el.dataset.act
   if (act === 'one') return nf.toggleOneThing()
+  if (act === 'quick') return nf.openQuick()
   if (act === 'occ') return nf.toggleOccurrence(el.dataset.key)
   if (act === 'brief') return nf.run('brief')
   if (act === 'refresh') {

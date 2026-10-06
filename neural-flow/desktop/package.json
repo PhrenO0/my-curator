@@ -1,6 +1,6 @@
 {
   "name": "neural-flow-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "neural-flow 데스크탑 — 바탕화면 반투명 캘린더 위젯 + 일정 관리 + 브리핑 비서",
   "main": "main/main.js",
@@ -9,13 +9,15 @@
     "dev": "electron . --dev",
     "test": "node --test test/*.test.js",
     "test:e2e": "node test/e2e/launch.js",
-    "check": "node -e \"for (const f of require('fs').readdirSync('main')) require('child_process').execFileSync(process.execPath, ['--check', 'main/' + f])\" && node --check preload.js"
+    "check": "node -e \"for (const f of require('fs').readdirSync('main')) require('child_process').execFileSync(process.execPath, ['--check', 'main/' + f])\" && node --check preload.js",
+    "dist": "npx --yes electron-builder@26.15.3 --publish never"
   },
   "author": "junsang",
   "license": "MIT",
   "build": {
     "appId": "com.junsang.neuralflow",
     "productName": "neural-flow",
+    "artifactName": "neural-flow-${version}-${os}-${arch}.${ext}",
     "files": [
       "main/**",
       "renderer/**",
@@ -23,15 +25,55 @@
       "assets/**",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/koffi/**",
+      "node_modules/@koromix/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../state.json",
+        "to": "state.json"
+      },
+      {
+        "from": "../config.json",
+        "to": "config.json"
+      }
+    ],
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "assets/icon.png"
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "neural-flow"
+    },
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
       "icon": "assets/icon.png",
-      "category": "public.app-category.productivity"
-    }
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "publish": null
   },
   "dependencies": {
     "node-ical": "^0.27.2",
@@ -40,5 +82,8 @@
   },
   "devDependencies": {
     "electron": "^44.4.5"
+  },
+  "optionalDependencies": {
+    "koffi": "^3.3.2"
   }
 }

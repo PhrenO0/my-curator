@@ -8,7 +8,14 @@ const crypto = require('crypto')
 const { ymd } = require('../renderer/shared/agenda.js')
 
 // 설치 파일로 패키징하면 repo 밖에서 돌기 때문에 NF_STATE_JSON 으로 경로를 지정할 수 있다.
-const STATE_JSON = process.env.NF_STATE_JSON || path.join(__dirname, '..', '..', 'state.json')
+// 설치 파일 안에서는 resources/state.json (빌드 때 같이 넣음)을 쓴다.
+const STATE_JSON =
+  process.env.NF_STATE_JSON ||
+  [path.join(__dirname, '..', '..', 'state.json'), process.resourcesPath && path.join(process.resourcesPath, 'state.json')]
+    .filter(Boolean)
+    .find((p) => fs.existsSync(p)) ||
+  path.join(__dirname, '..', '..', 'state.json')
+const CONFIG_JSON = path.join(path.dirname(STATE_JSON), 'config.json')
 
 const DEFAULT_FEEDS = [
   { name: 'GeekNews', url: 'https://news.hada.io/rss/news' },
@@ -25,13 +32,28 @@ const DEFAULT_SETTINGS = {
   feeds: DEFAULT_FEEDS,
   englishLevel: '중급 (비즈니스 회화)',
   autoStart: true,
+  // LLM 엔진: auto(Claude Code 있으면 그것, 없으면 Gemini 키, 둘 다 없으면 규칙) | claude | gemini | off
+  engine: 'auto',
+  claudeCmd: 'claude',
+  claudeModel: '',
+  // 로그인: 허용된 구글 계정만 앱을 열 수 있다
+  requireLogin: true,
+  google: {
+    clientId: '',
+    clientSecretEnc: '',
+    clientSecretPlain: '',
+    allowedEmails: [], // 비어 있으면 config.json 의 userEmail, 그것도 없으면 첫 로그인 계정이 주인이 된다
+    calendarIds: null, // null = 구글에서 '표시'로 켜 둔 캘린더 전부
+    defaultCalendar: 'primary',
+  },
+  quickShortcut: 'CommandOrControl+Shift+Space',
   widget: {
     visible: true,
     x: null,
     y: null,
     width: 360,
     opacity: 0.72,
-    theme: 'dark',
+    theme: 'auto',
     clickThrough: false,
     showOneThing: true,
     showCalendar: true,
@@ -133,6 +155,9 @@ function emptyData() {
     remote: { fetchedAt: null, events: [], errors: [] },
     history: [],
     doneMap: {},
+    account: null, // { email, name, picture, refreshEnc }
+    notes: [],
+    inbox: [],
     lastRun: {},
   }
 }
@@ -146,6 +171,7 @@ function mergeSettings(saved) {
     ...saved,
     widget: { ...base.widget, ...(saved.widget || {}) },
     schedule: { ...base.schedule, ...(saved.schedule || {}) },
+    google: { ...base.google, ...(saved.google || {}) },
   }
 }
 
@@ -170,6 +196,12 @@ class Store {
         console.log(`[store] state.json에서 활동 ${seeded.activities.length}개 · 일정 ${seeded.events.length}개를 가져옴`)
       }
       this.flush()
+    }
+    // 허용 계정 기본값: config.json 의 userEmail (레포 주인)
+    const g = this.data.settings.google
+    if (!g.allowedEmails?.length) {
+      const cfg = readJson(CONFIG_JSON)
+      if (cfg?.userEmail) g.allowedEmails = [String(cfg.userEmail).toLowerCase()]
     }
     // 비전·영역은 state.json 이 원본 — 있으면 매 실행마다 최신으로 맞춘다.
     const state = readJson(STATE_JSON)
