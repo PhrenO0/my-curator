@@ -1,0 +1,143 @@
+/* 빠른 입력 — macOS Spotlight 처럼 화면 위쪽에 뜨는 한 줄 입력창 */
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+}
+body {
+  padding: 16px;
+}
+.panel {
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.28), 0 0 0 1px rgb(0 0 0 / 0.06);
+  overflow: hidden;
+  animation: in 0.28s var(--ease);
+}
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-6px);
+  }
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 72px;
+  padding: 0 24px;
+}
+.spark {
+  color: var(--accent);
+  display: grid;
+}
+.bar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.bar input::placeholder {
+  color: var(--text-4);
+}
+.body {
+  border-top: 1px solid var(--line);
+  padding: 10px;
+}
+.body:empty {
+  display: none;
+}
+.hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
+.chip {
+  border: 0;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+.chip:hover {
+  background: var(--panel-3);
+}
+.card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--accent-soft);
+}
+.card .kind {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+}
+.card .what {
+  flex: 1;
+  min-width: 0;
+}
+.card b {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card span {
+  font-size: 14px;
+  color: var(--text-2);
+}
+.foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 10px 4px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.foot kbd {
+  font-family: var(--font);
+  background: var(--panel-2);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-right: 4px;
+}
+.done {
+  padding: 18px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ok);
+}
+.msg {
+  padding: 16px;
+  font-size: 15px;
+  color: var(--text-2);
+  text-align: center;
+}
+.msg button {
+  margin-top: 10px;
+  border: 0;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}

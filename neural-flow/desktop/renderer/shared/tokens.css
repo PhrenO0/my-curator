@@ -1,4 +1,6 @@
-/* 디자인 토큰 — shadcn/ui · Radix Colors 의 중립(zinc/slate) 팔레트 방식을 참고.
+/* 디자인 토큰 — 토스(TDS)·애플(iOS) 스타일.
+   밝은 회색 바탕 위에 테두리 없는 흰 카드, 넉넉한 여백, 큰 라운드, 굵고 또렷한 숫자.
+   한글은 Pretendard(애플 SF·Inter 와 섞어 쓰도록 만든 오픈 폰트), macOS 에선 영문/숫자에 SF Pro.
    색은 모두 토큰으로만 쓰고, 라이트/다크는 OS(nativeTheme) 설정을 따른다. */
 
 @font-face {
@@ -10,11 +12,12 @@
 }
 
 :root {
-  --font: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo',
-    'Malgun Gothic', system-ui, sans-serif;
+  --font: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo',
+    'Segoe UI', 'Malgun Gothic', system-ui, sans-serif;
+  /* 큰 숫자(시계·D-day)는 macOS 에서 SF Pro Display, 그 외 Pretendard */
+  --font-num: -apple-system, 'SF Pro Display', 'Pretendard Variable', Pretendard, system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
 
-  /* 간격 4px 스케일 */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -23,63 +26,70 @@
   --s6: 24px;
   --s8: 32px;
 
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-xl: 20px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-2xl: 28px;
 
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease: cubic-bezier(0.32, 0.72, 0, 1); /* iOS 스프링 느낌 */
 
-  /* 라이트 */
-  --bg: #fcfcfd;
-  --bg-subtle: #f6f6f8;
+  /* 라이트 (토스 그레이 스케일) */
+  --bg: #f2f4f6;
+  --bg-subtle: #f9fafb;
   --panel: #ffffff;
-  --panel-2: #f4f4f6;
-  --line: #e7e7ea;
-  --line-strong: #d6d6db;
-  --text: #18181b;
-  --text-2: #52525b;
-  --text-3: #8b8b94;
-  --accent: #5b5bd6;
-  --accent-soft: #ededfc;
-  --accent-text: #4747c2;
+  --panel-2: #f2f4f6;
+  --panel-3: #e5e8eb;
+  --line: #e5e8eb;
+  --line-strong: #d1d6db;
+  --text: #191f28;
+  --text-2: #4e5968;
+  --text-3: #8b95a1;
+  --text-4: #b0b8c1;
+  --accent: #3182f6;
+  --accent-hover: #1b64da;
+  --accent-soft: #e8f3ff;
+  --accent-text: #1b64da;
   --on-accent: #ffffff;
-  --ok: #16a34a;
-  --ok-soft: #e7f6ec;
-  --warn: #d97706;
-  --warn-soft: #fdf3e2;
-  --danger: #dc2626;
-  --danger-soft: #fdeaea;
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.06);
-  --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.18), 0 4px 12px rgb(0 0 0 / 0.08);
+  --ok: #03b26c;
+  --ok-soft: #e5f8ef;
+  --warn: #fe9800;
+  --warn-soft: #fff3e0;
+  --danger: #f04452;
+  --danger-soft: #ffeeee;
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 20px rgb(0 0 0 / 0.06);
+  --shadow-lg: 0 20px 60px rgb(0 0 0 / 0.16), 0 2px 8px rgb(0 0 0 / 0.06);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111113;
-    --bg-subtle: #161618;
-    --panel: #19191c;
-    --panel-2: #212125;
-    --line: #2a2a2f;
-    --line-strong: #3a3a41;
-    --text: #ededef;
-    --text-2: #b0b0b8;
-    --text-3: #75757e;
-    --accent: #8b8cf8;
-    --accent-soft: #23234a;
-    --accent-text: #b1b2ff;
-    --on-accent: #0f0f1a;
-    --ok: #4ade80;
-    --ok-soft: #13301f;
-    --warn: #fbbf24;
-    --warn-soft: #33270d;
-    --danger: #f87171;
-    --danger-soft: #3a1717;
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-    --shadow-md: 0 4px 16px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
-    --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
+    --bg: #101013;
+    --bg-subtle: #17171c;
+    --panel: #1c1c21;
+    --panel-2: #2a2a31;
+    --panel-3: #34343c;
+    --line: #2a2a31;
+    --line-strong: #3a3a43;
+    --text: #f2f4f6;
+    --text-2: #b0b8c1;
+    --text-3: #7e8794;
+    --text-4: #555b66;
+    --accent: #4593fc;
+    --accent-hover: #64a8ff;
+    --accent-soft: rgb(69 147 252 / 0.16);
+    --accent-text: #8bbcff;
+    --on-accent: #ffffff;
+    --ok: #2fd48a;
+    --ok-soft: rgb(47 212 138 / 0.14);
+    --warn: #ffb547;
+    --warn-soft: rgb(255 181 71 / 0.14);
+    --danger: #ff6b76;
+    --danger-soft: rgb(255 107 118 / 0.14);
+    --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 20px rgb(0 0 0 / 0.35);
+    --shadow-lg: 0 20px 60px rgb(0 0 0 / 0.6), 0 2px 8px rgb(0 0 0 / 0.3);
     color-scheme: dark;
   }
 }
@@ -94,12 +104,13 @@ body {
 }
 body {
   font-family: var(--font);
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1.5;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: 'ss06', 'tnum' 0;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
 }
 button,
 input,
@@ -111,6 +122,7 @@ textarea {
 }
 button {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .i {
   flex: none;
@@ -118,6 +130,7 @@ button {
   vertical-align: middle;
 }
 .num {
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
 }
 .sr-only {
@@ -138,6 +151,13 @@ button {
 }
 .spin {
   animation: spin 0.9s linear infinite;
+}
+/* 누르면 살짝 줄어드는 토스식 피드백 */
+.press {
+  transition: transform 0.2s var(--ease), background 0.15s;
+}
+.press:active {
+  transform: scale(0.97);
 }
 @media (prefers-reduced-motion: reduce) {
   * {

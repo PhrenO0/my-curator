@@ -5,7 +5,9 @@ on:
     paths:
       - 'neural-flow/desktop/**'
       - 'neural-flow/state.json'
+      - 'neural-flow/config.json'
       - '.github/workflows/desktop-ci.yml'
+      - '.github/workflows/desktop-release.yml'
   push:
     branches: [main]
     paths:
@@ -15,11 +17,17 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 실제 Windows · macOS 에서도 앱을 띄워 E2E 를 돌린다 (Win+D 테스트는 Windows 에서만)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: neural-flow/desktop
+        shell: bash
     env:
       TZ: Asia/Seoul
     steps:
@@ -33,7 +41,7 @@ jobs:
 
       - name: Install
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -qq && sudo apt-get install -y -qq xvfb; fi
           npm ci
 
       - name: Syntax check
@@ -42,15 +50,34 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: E2E (Electron + 가상 디스플레이)
-        run: xvfb-run -a -s "-screen 0 1600x1000x24" npm run test:e2e
+      - name: E2E (실제 Electron 앱)
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" npm run test:e2e
+          else
+            npm run test:e2e
+          fi
         env:
           NF_SHOT_DIR: ${{ github.workspace }}/e2e-shots
+
+      - name: Package smoke (설치 파일 빌드가 되는지)
+        if: runner.os != 'Linux'
+        run: npx --yes electron-builder@26.15.3 --dir --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: E2E on packaged app (설치본 그대로)
+        if: runner.os != 'Linux'
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then APP="$PWD/dist/win-unpacked/neural-flow.exe"
+          else APP="$(ls -d "$PWD"/dist/mac-arm64/neural-flow.app 2>/dev/null || ls -d "$PWD"/dist/mac*/neural-flow.app | head -1)/Contents/MacOS/neural-flow"; fi
+          echo "app: $APP"
+          NF_E2E_APP="$APP" npm run test:e2e
 
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-screenshots
+          name: e2e-screenshots-${{ matrix.os }}
           path: e2e-shots
           if-no-files-found: ignore

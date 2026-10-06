@@ -12,10 +12,12 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-e2e-'))
 const port = String(47000 + Math.floor(Math.random() * 900))
 if (process.env.NF_SHOT_DIR) fs.mkdirSync(process.env.NF_SHOT_DIR, { recursive: true })
 
-const args = ['.']
+// NF_E2E_APP=설치본 실행 파일 경로 를 주면 소스 대신 패키징된 앱을 검사한다
+const bin = process.env.NF_E2E_APP || electron
+const args = process.env.NF_E2E_APP ? [] : ['.']
 if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu')
 
-const child = spawn(electron, args, {
+const child = spawn(bin, args, {
   cwd: root,
   stdio: ['ignore', 'pipe', 'pipe'],
   env: {
@@ -24,6 +26,15 @@ const child = spawn(electron, args, {
     NF_DATA_DIR: dataDir,
     NF_E2E_PORT: port,
     NF_GEMINI_BASE: `http://127.0.0.1:${port}`,
+    // 가짜 구글 (로그인·캘린더)
+    NF_GOOGLE_AUTH: `http://127.0.0.1:${port}/o/auth`,
+    NF_GOOGLE_TOKEN: `http://127.0.0.1:${port}/o/token`,
+    NF_GOOGLE_REVOKE: `http://127.0.0.1:${port}/o/revoke`,
+    NF_GOOGLE_USERINFO: `http://127.0.0.1:${port}/o/userinfo`,
+    NF_GOOGLE_CALENDAR: `http://127.0.0.1:${port}/calendar/v3`,
+    NF_TEST_OPEN_URL: 'fetch', // 브라우저 대신 앱이 직접 로그인 URL 을 연다
+    // 가짜 Claude Code CLI
+    NF_CLAUDE_CMD: `"${process.execPath}" "${path.join(__dirname, 'fake-claude.js')}"`,
     GOOGLE_API_KEY: '', // 개발자 PC 의 실제 키가 섞이지 않게
   },
 })

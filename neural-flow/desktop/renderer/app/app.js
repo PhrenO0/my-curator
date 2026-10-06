@@ -3,7 +3,13 @@ const A = NFAgenda
 const { esc, timeAgo, speak, greetingByHour } = UI
 
 const $side = document.getElementById('side')
-const $main = document.getElementById('main')
+const $main = document.getElementById('view')
+const $scroll = document.getElementById('main')
+const $shell = document.getElementById('shell')
+const $lock = document.getElementById('lock')
+const $ask = document.getElementById('ask')
+const $askInput = document.getElementById('ask-input')
+const $askPreview = document.getElementById('ask-preview')
 const $modal = document.getElementById('modal')
 const $toast = document.getElementById('toast')
 
@@ -43,7 +49,7 @@ function go(r) {
   route = r
   history.replaceState(null, '', `#${r}`)
   render()
-  $main.scrollTop = 0
+  $scroll.scrollTop = 0
 }
 
 function toast(msg) {
@@ -67,6 +73,99 @@ function occ(from, to) {
   return A.occurrences({ events: S.events, remote: S.remote.events || [], activities: S.activities, doneMap: S.doneMap }, from, to)
 }
 
+const ENGINE_LABEL = { claude: 'AI · Claude Code', gemini: 'AI · Gemini', none: 'AI 꺼짐 (규칙 모드)' }
+const avatar = (a) =>
+  a.picture
+    ? `<img class="avatar" src="${esc(a.picture)}" alt="" referrerpolicy="no-referrer" />`
+    : `<span class="avatar">${esc((a.name || a.email || '?').slice(0, 1).toUpperCase())}</span>`
+
+// ── 잠금(로그인) 화면 ────────────────────────────────────────────────────────
+let lockError = ''
+let lockSetup = false
+function renderLock() {
+  const g = S.settings.google || {}
+  const owner = (g.allowedEmails || []).join(', ')
+  const needSetup = !g.clientId || lockSetup
+  if ($lock.contains(document.activeElement) && document.activeElement.matches('input')) return
+  $lock.innerHTML = `<div class="lock"><div class="lock-card">
+    <div class="brand-mark">${icon('waves', 30)}</div>
+    <h1>neural-flow</h1>
+    <p>${owner ? `<b>${esc(owner)}</b> 계정으로만 열 수 있어요` : '처음 로그인한 구글 계정이 주인으로 등록돼요'}</p>
+    ${
+      needSetup
+        ? `<ol class="steps">
+            <li>Google Cloud 콘솔 → API 및 서비스 → <b>Google Calendar API</b> 사용 설정</li>
+            <li>OAuth 동의 화면: 외부 · 테스트 사용자에 본인 이메일 추가</li>
+            <li>사용자 인증 정보 → OAuth 클라이언트 ID → 유형 <b>데스크톱 앱</b></li>
+            <li>만든 클라이언트 ID·보안 비밀을 아래에 붙여넣기</li>
+          </ol>
+          <form id="auth-form">
+            <div class="f"><label>클라이언트 ID</label><input class="input" name="clientId" value="${esc(g.clientId || '')}" placeholder="xxxx.apps.googleusercontent.com" required /></div>
+            <div class="f"><label>클라이언트 보안 비밀</label><input class="input" name="clientSecret" type="password" placeholder="${g.hasSecret ? '저장됨 — 바꿀 때만 입력' : 'GOCSPX-…'}" /></div>
+            <button class="btn primary lg block">저장하고 계속</button>
+          </form>`
+        : `<button class="btn primary lg block gbtn" data-act="signin" ${S.busy.signin ? 'disabled' : ''}>${S.busy.signin ? '브라우저에서 로그인을 마쳐 주세요…' : 'Google 계정으로 로그인'}</button>
+           <button class="btn ghost sm" style="margin-top:12px" data-act="lock-setup">로그인 설정 바꾸기</button>`
+    }
+    ${lockError ? `<div class="err">${esc(lockError)}</div>` : ''}
+  </div></div>`
+}
+
+// ── 언제든 입력 (상단 바) ────────────────────────────────────────────────────
+const KIND = {
+  event: ['calendar-plus', '일정'],
+  task: ['list-todo', '할 일'],
+  one_thing: ['target', '오늘의 단 하나'],
+  note: ['sticky-note', '메모'],
+}
+let askItem = null
+function describe(item) {
+  const when = item.date ? `${A.formatKoreanDate(item.date)}${item.start ? ` ${item.start}` : item.kind === 'event' ? ' 종일' : ''}` : ''
+  const where = {
+    event: S.account ? '구글 캘린더에 추가' : '앱 일정에 추가',
+    task: '활동 보드에 추가',
+    one_thing: '오늘의 단 하나로 정하기',
+    note: '메모로 저장',
+  }[item.kind]
+  return [when, item.minutes ? `${item.minutes}분` : '', where].filter(Boolean).join(' · ')
+}
+function renderAskPreview() {
+  if (!askItem) return ($askPreview.innerHTML = '')
+  const [ic, label] = KIND[askItem.kind] || KIND.task
+  $askPreview.innerHTML = `<div class="preview">
+    <span class="kind">${icon(ic, 20)}</span>
+    <div class="what"><b>${esc(askItem.title)}</b><span>${esc(label)} · ${esc(describe(askItem))}${askItem.source && askItem.source !== 'rules' ? ' · AI 해석' : ''}</span></div>
+    <button class="btn sm" data-act="ask-cancel">취소</button>
+    <button class="btn sm primary" data-act="ask-commit">${icon('corner-down-left', 14)}추가</button>
+  </div>`
+}
+async function askSubmit() {
+  const text = $askInput.value.trim()
+  if (!text) return
+  if (askItem && askItem._text === text) return askCommit()
+  askItem = { ...(await nf.previewInput(text)), _text: text }
+  renderAskPreview()
+}
+async function askCommit() {
+  if (!askItem) return
+  const r = await nf.commitInput(askItem)
+  toast(r?.message || '추가했어요')
+  askItem = null
+  $askInput.value = ''
+  renderAskPreview()
+}
+$ask.addEventListener('submit', (e) => {
+  e.preventDefault()
+  askSubmit()
+})
+$askInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    askItem = null
+    $askInput.value = ''
+    renderAskPreview()
+  }
+})
+
 // ── 사이드바 ────────────────────────────────────────────────────────────────
 function renderSide() {
   const open = S.activities.filter((a) => a.status === '제안됨').length
@@ -80,10 +179,15 @@ function renderSide() {
         `<button class="nav ${route === r ? 'on' : ''}" data-go="${r}">${icon(ic, 16)}<span>${l}</span><span class="count">${counts[r] || ''}</span></button>`
     ).join('')}
     <div class="side-foot">
-      <div class="status"><span class="dot ${k.hasKey ? 'ok' : 'warn'}"></span>${k.hasKey ? `AI 연결됨 · ${esc(k.geminiModel)}` : 'AI 키 없음 (규칙 모드)'}</div>
-      <div class="status"><span class="dot ${k.icsUrls?.length ? 'ok' : ''}"></span>${
-        k.icsUrls?.length ? `구글 캘린더 · ${timeAgo(S.remote.fetchedAt) || '대기'}` : '구글 캘린더 미연결'
+      <div class="status"><span class="dot ${k.provider !== 'none' ? 'ok' : 'warn'}"></span>${ENGINE_LABEL[k.provider] || '규칙 모드'}</div>
+      <div class="status"><span class="dot ${S.account ? 'ok' : ''}"></span>${
+        S.account ? `구글 캘린더 · ${timeAgo(S.remote.fetchedAt) || '동기화 대기'}` : k.icsUrls?.length ? 'iCal 주소로 읽는 중' : '구글 캘린더 미연결'
       }</div>
+      ${
+        S.account
+          ? `<div class="me">${avatar(S.account)}<div class="who"><b>${esc(S.account.name || S.account.email.split('@')[0])}</b><span>${esc(S.account.email)}</span></div></div>`
+          : ''
+      }
       <button class="btn sm" data-act="widget-mode">${icon(S.widgetMode === 'edit' ? 'pin' : 'move', 14)}${
         S.widgetMode === 'edit' ? '위젯 고정하기' : '위젯 위치 옮기기'
       }</button>
@@ -111,7 +215,13 @@ function viewToday() {
         </div>
       </div>
       <div class="hero-foot">
-        ${b.source === 'gemini' ? `<span class="badge accent">${icon('sparkles', 11)}AI 코칭</span>` : b.source === 'manual' ? '<span class="badge">직접 정함</span>' : '<span class="badge">규칙 기반 선정</span>'}
+        ${
+          b.source === 'gemini' || b.source === 'claude'
+            ? `<span class="badge accent">${icon('sparkles', 11)}${b.source === 'claude' ? 'Claude' : 'Gemini'} 코칭</span>`
+            : b.source === 'manual'
+              ? '<span class="badge">직접 정함</span>'
+              : '<span class="badge">규칙 기반 선정</span>'
+        }
         ${b.done ? '<span class="badge ok">완료</span>' : ''}
         <span class="grow"></span>
         <button class="btn sm ghost" data-act="set-one">${icon('pencil', 13)}직접 정하기</button>
@@ -187,11 +297,17 @@ function agendaList(items, { editable = true } = {}) {
   return `<ul class="agenda">${items
     .map(
       (o) => `
-    <li class="ag ${o.done ? 'done' : ''}" ${editable && o.kind !== 'remote' ? `data-act="edit-occ" data-kind="${o.kind}" data-id="${esc(o.id)}"` : ''}>
+    <li class="ag ${o.done ? 'done' : ''}" ${
+      editable && o.kind !== 'remote'
+        ? `data-act="edit-occ" data-kind="${o.kind}" data-id="${esc(o.id)}"`
+        : o.link
+          ? `data-act="link" data-url="${esc(o.link)}" title="구글 캘린더에서 열기"`
+          : ''
+    }>
       <span class="bar" style="background:${o.color}"></span>
       <span class="time">${o.start ? esc(o.start) : '종일'}</span>
       <span class="t">${esc(o.title)}</span>
-      <span class="meta">${o.kind === 'remote' ? '구글' : o.kind === 'activity' ? '활동' : o.repeat ? icon('repeat', 12) : ''}</span>
+      <span class="meta">${o.kind === 'remote' ? esc(o.domain || '구글') : o.kind === 'activity' ? '활동' : o.repeat ? icon('repeat', 12) : ''}</span>
       ${o.kind !== 'remote' ? `<button class="check sm ${o.done ? 'on' : ''}" data-act="occ" data-key="${esc(o.key)}" aria-label="완료">${icon('check', 11)}</button>` : ''}
     </li>`
     )
@@ -216,7 +332,7 @@ function viewCalendar() {
         ${shown
           .map(
             (o) =>
-              `<button class="pill ${o.done ? 'done' : ''}" style="--c:${o.color}" ${o.kind !== 'remote' ? `data-act="edit-occ" data-kind="${o.kind}" data-id="${esc(o.id)}"` : ''} title="${esc(`${o.start ? o.start + ' ' : ''}${o.title}`)}"><span class="tt">${esc(o.title)}</span></button>`
+              `<button class="pill ${o.done ? 'done' : ''}" style="--c:${o.color}" ${o.kind !== 'remote' ? `data-act="edit-occ" data-kind="${o.kind}" data-id="${esc(o.id)}"` : o.link ? `data-act="link" data-url="${esc(o.link)}"` : ''} title="${esc(`${o.start ? o.start + ' ' : ''}${o.title}`)}"><span class="tt">${esc(o.title)}</span></button>`
           )
           .join('')}
         ${items.length > 3 ? `<span class="more">+${items.length - 3}개</span>` : ''}
@@ -316,7 +432,7 @@ function viewBrief() {
     ? `
   <section class="card">
     <h2>${icon('languages', 14)}<span class="grow">오늘의 영어 회화</span>
-      ${e.source === 'gemini' ? '<span class="badge accent">AI 맞춤</span>' : '<span class="badge">기본 표현집</span>'}
+      ${e.source === 'gemini' || e.source === 'claude' ? '<span class="badge accent">AI 맞춤</span>' : '<span class="badge">기본 표현집</span>'}
       <button class="icon-btn" data-act="run" data-job="english" title="다른 표현">${icon('refresh-cw', 14, S.busy.english ? 'spin' : '')}</button></h2>
     <div class="inline" style="align-items:flex-start">
       <div style="flex:1"><div class="en-big">${esc(e.expression)}</div>
@@ -368,9 +484,54 @@ function viewSettings() {
   return `
   <div class="page-h"><div class="titles"><div class="eyebrow">모든 데이터는 이 PC에만 저장돼요</div><h1>설정</h1></div></div>
   <div class="settings">
-    <section class="card"><h2>${icon('sparkles', 14)}AI (Gemini)</h2>
+    <section class="card"><h2>${icon('lock', 16)}계정</h2>
       ${field(
-        'API 키',
+        '로그인',
+        S.account ? '이 계정으로 구글 캘린더를 읽고 써요' : '',
+        S.account
+          ? `<div class="inline"><div class="me" style="flex:1">${avatar(S.account)}<div class="who"><b>${esc(S.account.name || '')}</b><span>${esc(S.account.email)}</span></div></div><button class="btn" data-act="signout">${icon('log-out', 15)}로그아웃</button></div>`
+          : `<button class="btn primary" data-act="signin">Google 계정으로 로그인</button>`
+      )}
+      ${field('허용 계정', '이 이메일로만 앱을 열 수 있어요. 쉼표로 여러 개.', `<input class="input" data-set="google.allowedEmails" value="${esc((s.google.allowedEmails || []).join(', '))}" />`)}
+      ${field('로그인 필수', '끄면 로그인 없이 열려요 (구글 캘린더는 로그인해야 연결)', sw('requireLogin', s.requireLogin !== false))}
+      ${
+        S.remote.calendars?.length
+          ? field(
+              '새 일정 저장 위치',
+              '빠른 입력·새 일정이 들어갈 캘린더',
+              `<select class="input" data-set="google.defaultCalendar">${opt(
+                S.remote.calendars.filter((c) => c.writable).map((c) => [c.primary ? 'primary' : c.id, c.name]),
+                s.google.defaultCalendar || 'primary'
+              )}</select>`
+            ) +
+            field(
+              '표시할 캘린더',
+              '위젯·캘린더에 보일 캘린더',
+              S.remote.calendars
+                .map((c) => {
+                  const on = s.google.calendarIds ? s.google.calendarIds.includes(c.id) : c.selected
+                  return `<label class="cal-pick" style="--c:${esc(c.color)}"><i></i><span>${esc(c.name)}</span><input type="checkbox" class="switch" data-act="cal-toggle" data-id="${esc(c.id)}" ${on ? 'checked' : ''} /></label>`
+                })
+                .join('')
+            )
+          : ''
+      }
+    </section>
+
+    <section class="card"><h2>${icon('bot', 16)}AI 엔진</h2>
+      ${field(
+        '엔진',
+        `지금: <b>${esc(ENGINE_LABEL[s.provider] || '')}</b><br>자동 = 노트북에 Claude Code 가 있으면 그것(내 Claude 구독), 없으면 Gemini 키, 둘 다 없으면 규칙.`,
+        seg('engine', s.engine || 'auto', [['auto', '자동'], ['claude', 'Claude Code'], ['gemini', 'Gemini'], ['off', '끄기']])
+      )}
+      ${field(
+        'Claude Code',
+        s.claudeVersion ? `<b style="color:var(--ok)">찾음</b> · ${esc(s.claudeVersion)}` : '못 찾음 — 노트북 터미널에서 <code>claude</code> 설치·로그인 후 [다시 찾기]',
+        `<div class="inline"><input class="input" data-set="claudeCmd" value="${esc(s.claudeCmd || 'claude')}" /><button class="btn" data-act="detect-engine">다시 찾기</button></div>`
+      )}
+      ${field('Claude 모델', '비우면 Claude Code 기본값', `<input class="input" data-set="claudeModel" value="${esc(s.claudeModel || '')}" placeholder="예: sonnet" />`)}
+      ${field(
+        'Gemini API 키',
         `상태: ${s.hasKey ? `<b style="color:var(--ok)">연결됨</b> (${esc(s.keySource)})` : '<b style="color:var(--warn)">없음</b> — 규칙 기반으로 동작'}<br>기존 neural-flow 의 <code>GOOGLE_API_KEY</code>와 같은 키. OS 키체인으로 암호화해 저장.`,
         `<div class="inline"><input class="input" id="key" type="password" placeholder="${s.hasKey ? '••••••••  (바꾸려면 새 키 입력)' : 'AIza…'}" autocomplete="off" /><button class="btn" data-act="save-key">저장·테스트</button></div>`
       )}
@@ -379,10 +540,10 @@ function viewSettings() {
       ${field('영어 수준', '회화 표현 난이도', `<input class="input" data-set="englishLevel" value="${esc(s.englishLevel)}" />`)}
     </section>
 
-    <section class="card"><h2>${icon('calendar-days', 14)}구글 캘린더 연결 (읽기)</h2>
+    <section class="card"><h2>${icon('calendar-days', 16)}iCal 주소 (선택 · 읽기 전용)</h2>
       ${field(
         '비공개 iCal 주소',
-        `구글 캘린더 → 설정 → 내 캘린더 → '캘린더 통합' → <b>iCal 형식의 비공개 주소</b>를 복사해 붙여넣기. 한 줄에 하나.${(S.remote.errors || []).length ? `<br><span style="color:var(--danger)">오류: ${S.remote.errors.map((e) => esc(e.message)).join(', ')}</span>` : ''}`,
+        `로그인 없이 다른 캘린더(회사·공유)를 더 보고 싶을 때. 구글 캘린더 설정 → '캘린더 통합' → <b>iCal 형식의 비공개 주소</b>. 한 줄에 하나.${(S.remote.errors || []).length ? `<br><span style="color:var(--danger)">오류: ${S.remote.errors.map((e) => esc(e.message)).join(', ')}</span>` : ''}`,
         `<textarea class="input" data-set="icsUrls" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics">${esc((s.icsUrls || []).join('\n'))}</textarea>
          <div class="muted small" style="margin-top:6px">${S.remote.fetchedAt ? `마지막 동기화 ${timeAgo(S.remote.fetchedAt)} · ${S.remote.events.length}개` : ''}</div>`
       )}
@@ -446,6 +607,11 @@ function openModal(html, onSubmit) {
   form.querySelector('input')?.focus()
 }
 
+const toMin = (hm) => {
+  const [h, m] = hm.split(':').map(Number)
+  return h * 60 + m
+}
+
 function eventModal(ev) {
   const isNew = !ev.id
   openModal(
@@ -462,6 +628,11 @@ function eventModal(ev) {
         <div class="f"><label>영역</label><select class="input" name="domain">${domainOptions(ev.domain)}</select></div>
       </div>
       <div class="f"><label>메모</label><input class="input" name="note" value="${esc(ev.note || '')}" /></div>
+      ${
+        isNew && S.account
+          ? `<div class="f"><label>저장 위치</label><select class="input" name="target"><option value="google">구글 캘린더 (${esc(S.account.email)})</option><option value="local">이 앱에만 (반복·D-day 가능)</option></select></div>`
+          : ''
+      }
       <label class="check-line"><input type="checkbox" class="switch" name="deadline" ${ev.deadline ? 'checked' : ''} />마감 — D-day 카운트다운에 표시</label>
       <div class="modal-foot">
         ${isNew ? '' : `<button class="btn danger ghost" value="delete" formnovalidate>${icon('trash-2', 14)}삭제</button>`}
@@ -474,6 +645,11 @@ function eventModal(ev) {
       if (action === 'delete') {
         await nf.deleteEvent(ev.id)
         return toast('삭제했어요')
+      }
+      if (f.target === 'google') {
+        const mins = f.start && f.end ? toMin(f.end) - toMin(f.start) : 60
+        const r = await nf.commitInput({ kind: 'event', title: f.title, date: f.date, start: f.start || null, minutes: mins > 0 ? mins : 60, target: 'google' })
+        return toast(r?.message || '저장했어요')
       }
       await nf.saveEvent({ ...ev, ...f, deadline: f.deadline === 'on' })
       toast('저장했어요')
@@ -538,9 +714,13 @@ const VIEWS = { today: viewToday, calendar: viewCalendar, board: viewBoard, brie
 
 function render() {
   if (!S) return
+  $lock.hidden = !S.locked
+  $shell.hidden = !!S.locked
+  if (S.locked) return renderLock()
+  document.getElementById('ask-kbd').textContent = S.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space'
   renderSide()
-  // 설정 화면에서 입력 중이면 다시 그리지 않는다 (커서 튐 방지)
-  if (route === 'settings' && $main.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return
+  // 입력 중이면 다시 그리지 않는다 (커서 튐 방지)
+  if ($main.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return
   $main.innerHTML = (VIEWS[route] || viewToday)()
 }
 
@@ -558,6 +738,35 @@ document.addEventListener('click', async (e) => {
   const act = el.dataset.act
   const d = el.dataset
   switch (act) {
+    case 'signin': {
+      lockError = ''
+      const r = await nf.signIn()
+      if (!r.ok) lockError = r.message
+      else toast(`${r.email} 로 로그인했어요`)
+      return refresh()
+    }
+    case 'signout':
+      await nf.signOut()
+      return refresh()
+    case 'lock-setup':
+      lockSetup = true
+      return render()
+    case 'ask-commit':
+      return askCommit()
+    case 'ask-cancel':
+      askItem = null
+      return renderAskPreview()
+    case 'detect-engine': {
+      const v = await nf.detectEngine()
+      return toast(v ? `Claude Code 찾음 · ${v}` : 'Claude Code 를 못 찾았어요')
+    }
+    case 'cal-toggle': {
+      const cals = S.remote.calendars || []
+      const cur = S.settings.google.calendarIds || cals.filter((c) => c.selected).map((c) => c.id)
+      const next = el.checked ? [...new Set([...cur, d.id])] : cur.filter((x) => x !== d.id)
+      await nf.saveSettings({ google: { calendarIds: next } })
+      return toast('저장했어요')
+    }
     case 'one':
       return nf.toggleOneThing()
     case 'set-one':
@@ -637,6 +846,18 @@ document.addEventListener('click', async (e) => {
   }
 })
 
+// 잠금 화면: 로그인 설정 저장
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'auth-form') return
+  e.preventDefault()
+  const f = Object.fromEntries(new FormData(e.target))
+  await nf.authConfig({ clientId: f.clientId, ...(f.clientSecret ? { clientSecret: f.clientSecret } : {}) })
+  lockSetup = false
+  lockError = ''
+  document.activeElement?.blur()
+  refresh()
+})
+
 // 캘린더 빈 칸 더블클릭 → 새 일정
 document.addEventListener('dblclick', (e) => {
   const cell = e.target.closest('.cell')
@@ -650,6 +871,7 @@ document.addEventListener('change', async (e) => {
   const key = el.dataset.set
   let v = el.type === 'checkbox' ? el.checked : el.value
   if (key === 'icsUrls') v = v.split(/\s+/).map((x) => x.trim()).filter(Boolean)
+  if (key === 'google.allowedEmails') v = v.split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean)
   if (el.type === 'number' || el.type === 'range' || key === 'schedule.weeklyDay') v = Number(v)
   await nf.saveSettings(setByPath(key, v))
   toast('저장했어요')

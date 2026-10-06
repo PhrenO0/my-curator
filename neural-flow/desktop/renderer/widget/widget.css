@@ -1,10 +1,12 @@
-/* 바탕화면 위젯 — macOS 데스크탑 위젯/Übersicht 처럼 카드가 쌓인 형태.
-   창 자체는 투명하고, 카드마다 반투명 '유리' 배경을 둔다. */
+/* 바탕화면 위젯 — iOS/macOS 위젯처럼: 큰 라운드 글래스 카드, 굵고 또렷한 숫자, 토스 블루 포인트.
+   창 자체는 투명하고, 카드마다 반투명 배경을 둔다. */
 
 html,
 body {
   background: transparent;
   overflow: hidden;
+  user-select: none;
+  cursor: default;
 }
 body {
   overflow-y: auto; /* 화면보다 길면 위젯 안에서 스크롤 */
@@ -12,64 +14,66 @@ body {
 body::-webkit-scrollbar {
   width: 0;
 }
-html,
-body {
-  user-select: none;
-  cursor: default;
-}
 
 :root {
   --glass-alpha: 0.72;
-  --g-bg: rgb(18 18 22 / var(--glass-alpha));
-  --g-bg-2: rgb(255 255 255 / 0.06);
-  --g-line: rgb(255 255 255 / 0.1);
-  --g-hi: rgb(255 255 255 / 0.14);
-  --g-text: rgb(255 255 255 / 0.94);
+  --g-bg: rgb(28 28 32 / var(--glass-alpha));
+  --g-fill: rgb(255 255 255 / 0.08);
+  --g-fill-2: rgb(255 255 255 / 0.14);
+  --g-line: rgb(255 255 255 / 0.08);
+  --g-text: rgb(255 255 255 / 0.96);
   --g-text-2: rgb(255 255 255 / 0.66);
   --g-text-3: rgb(255 255 255 / 0.42);
-  --g-hover: rgb(255 255 255 / 0.08);
-  --g-accent: #a5a6ff;
-  --g-sun: #ff9d9d;
-  --g-sat: #9dbfff;
-  --g-shadow: 0 8px 32px rgb(0 0 0 / 0.28);
+  --g-accent: #4593fc;
+  --g-on-accent: #ffffff;
+  --g-sun: #ff6b76;
+  --g-sat: #6aa8ff;
+  --g-shadow: 0 10px 40px rgb(0 0 0 / 0.25);
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --g-bg: rgb(250 250 252 / var(--glass-alpha));
-    --g-bg-2: rgb(0 0 0 / 0.04);
-    --g-line: rgb(0 0 0 / 0.08);
-    --g-hi: rgb(255 255 255 / 0.7);
-    --g-text: rgb(20 20 24 / 0.94);
-    --g-text-2: rgb(20 20 24 / 0.64);
-    --g-text-3: rgb(20 20 24 / 0.42);
-    --g-hover: rgb(0 0 0 / 0.05);
-    --g-accent: #5b5bd6;
-    --g-sun: #dc2626;
-    --g-sat: #2563eb;
-    --g-shadow: 0 8px 32px rgb(0 0 0 / 0.12);
+    --g-bg: rgb(255 255 255 / var(--glass-alpha));
+    --g-fill: rgb(0 0 0 / 0.04);
+    --g-fill-2: rgb(0 0 0 / 0.07);
+    --g-line: rgb(0 0 0 / 0.06);
+    --g-text: #191f28;
+    --g-text-2: #4e5968;
+    --g-text-3: #8b95a1;
+    --g-accent: #3182f6;
+    --g-sun: #f04452;
+    --g-sat: #3182f6;
+    --g-shadow: 0 10px 40px rgb(0 0 0 / 0.1);
   }
 }
 
 #root {
-  padding: 8px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   color: var(--g-text);
 }
 
 .card {
   background: var(--g-bg);
-  border: 1px solid var(--g-line);
-  border-radius: var(--r-xl);
-  box-shadow: inset 0 1px 0 var(--g-hi), var(--g-shadow);
-  padding: 14px 16px;
-  animation: rise 0.4s var(--ease) both;
+  border-radius: 26px;
+  box-shadow: var(--g-shadow);
+  padding: 18px 18px 16px;
+  animation: rise 0.45s var(--ease) both;
+}
+#root > .card:nth-child(2) {
+  animation-delay: 0.04s;
+}
+#root > .card:nth-child(3) {
+  animation-delay: 0.08s;
+}
+#root > .card:nth-child(4) {
+  animation-delay: 0.12s;
 }
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px) scale(0.99);
   }
 }
 
@@ -77,9 +81,8 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--g-text-3);
   margin-bottom: 10px;
 }
@@ -90,70 +93,68 @@ body {
 .icon-btn {
   display: inline-grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: transparent;
   color: var(--g-text-3);
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, transform 0.2s var(--ease);
 }
 .icon-btn:hover {
-  background: var(--g-hover);
+  background: var(--g-fill);
   color: var(--g-text);
 }
+.icon-btn:active {
+  transform: scale(0.92);
+}
 
-/* ── 시계 ── */
+/* ── 시계 (잠금화면 시계처럼) ── */
 .clock {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
 }
 .clock-time {
-  font-size: 46px;
-  font-weight: 250;
+  font-family: var(--font-num);
+  font-size: 58px;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
-}
-.clock-time .sec {
-  font-size: 18px;
-  font-weight: 400;
-  color: var(--g-text-3);
-  margin-left: 4px;
-  letter-spacing: 0;
 }
 .clock-date {
   margin-top: 8px;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--g-text-2);
 }
 .clock-tools {
   display: flex;
-  gap: 2px;
-  margin-top: -4px;
-  margin-right: -8px;
+  gap: 0;
+  margin: -4px -8px 0 0;
 }
 .chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  padding: 4px 10px 4px 8px;
+  height: 30px;
+  padding: 0 12px 0 10px;
   border-radius: 999px;
-  background: var(--g-bg-2);
-  border: 1px solid var(--g-line);
-  font-size: 12px;
+  background: var(--g-fill);
+  font-size: 13px;
+  font-weight: 600;
   color: var(--g-text-2);
 }
 .chip b {
+  font-family: var(--font-num);
   font-weight: 700;
   color: var(--g-text);
   font-variant-numeric: tabular-nums;
@@ -177,14 +178,14 @@ body {
   flex: none;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   margin-top: 1px;
   border-radius: 999px;
-  border: 1.5px solid var(--g-text-3);
+  border: 2px solid var(--g-text-3);
   background: transparent;
   color: transparent;
-  transition: all 0.2s var(--ease);
+  transition: all 0.25s var(--ease);
 }
 .check:hover {
   border-color: var(--g-accent);
@@ -192,36 +193,37 @@ body {
 .check.on {
   background: var(--g-accent);
   border-color: var(--g-accent);
-  color: #111;
+  color: var(--g-on-accent);
 }
 .one-text {
-  font-size: 16.5px;
-  font-weight: 600;
-  line-height: 1.4;
-  letter-spacing: -0.02em;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.38;
+  letter-spacing: -0.035em;
 }
 .one-text.done {
   color: var(--g-text-3);
   text-decoration: line-through;
-  text-decoration-thickness: 1.5px;
 }
 .one-why {
   margin-top: 6px;
-  font-size: 12.5px;
+  font-size: 13.5px;
   line-height: 1.55;
   color: var(--g-text-2);
 }
 .holy {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--g-line);
-  font-size: 12.5px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--g-fill);
+  font-size: 13px;
+  font-weight: 600;
   color: var(--g-text-2);
   display: flex;
   gap: 8px;
 }
 .empty {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--g-text-3);
 }
 .link-btn {
@@ -229,7 +231,7 @@ body {
   background: none;
   padding: 0;
   color: var(--g-accent);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* ── 월 달력 ── */
@@ -240,8 +242,9 @@ body {
 }
 .cal-title {
   flex: 1;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
+  color: var(--g-accent);
 }
 .cal-grid {
   display: grid;
@@ -250,8 +253,8 @@ body {
   text-align: center;
 }
 .cal-wd {
-  font-size: 10.5px;
-  font-weight: 600;
+  font-size: 11.5px;
+  font-weight: 700;
   color: var(--g-text-3);
   padding-bottom: 4px;
 }
@@ -263,23 +266,24 @@ body {
 }
 .cal-day {
   position: relative;
-  height: 30px;
+  height: 32px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 999px;
   background: transparent;
-  font-size: 12.5px;
-  font-weight: 500;
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--g-text);
   padding: 0;
   isolation: isolate;
 }
 .cal-day:hover {
-  background: var(--g-hover);
+  background: var(--g-fill);
 }
 .cal-day.out {
   color: var(--g-text-3);
-  opacity: 0.55;
+  opacity: 0.5;
 }
 .cal-day.sun {
   color: var(--g-sun);
@@ -288,30 +292,33 @@ body {
   color: var(--g-sat);
 }
 .cal-day.sel {
-  background: var(--g-bg-2);
-  box-shadow: inset 0 0 0 1px var(--g-line);
+  background: var(--g-fill-2);
 }
 .cal-day.today {
-  color: #111;
+  color: var(--g-on-accent);
   font-weight: 700;
 }
 .cal-day.today::before {
   content: '';
   position: absolute;
-  inset: 3px 8px 9px;
-  border-radius: 8px;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -16px 0 0 -14px;
+  border-radius: 999px;
   background: var(--g-accent);
   z-index: -1;
 }
 .cal-day span {
   position: relative;
-  top: -3px;
+  top: -2px;
 }
 .dots {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 2px;
+  bottom: 1px;
   display: flex;
   justify-content: center;
   gap: 2px;
@@ -324,7 +331,7 @@ body {
 
 /* ── 일정 목록 (달력 카드 하단) ── */
 .agenda-wrap {
-  margin-top: 10px;
+  margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--g-line);
 }
@@ -340,31 +347,33 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 8px;
+  padding: 7px 8px;
   margin: 0 -8px;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 .ag:hover {
-  background: var(--g-hover);
+  background: var(--g-fill);
 }
 .ag .bar {
-  width: 3px;
-  align-self: stretch;
-  border-radius: 3px;
+  width: 4px;
+  height: 18px;
+  border-radius: 4px;
   flex: none;
 }
 .ag .time {
-  width: 40px;
+  width: 42px;
   flex: none;
-  font-size: 12px;
+  font-family: var(--font-num);
+  font-size: 13px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--g-text-2);
+  color: var(--g-text-3);
 }
 .ag .title {
   flex: 1;
   min-width: 0;
-  font-size: 13.5px;
-  font-weight: 500;
+  font-size: 14.5px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -374,11 +383,12 @@ body {
   text-decoration: line-through;
 }
 .ag .mini-check {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 .ag .tag {
-  font-size: 10.5px;
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--g-text-3);
 }
 
@@ -386,41 +396,38 @@ body {
 .seg {
   display: inline-flex;
   padding: 2px;
-  border-radius: 9px;
-  background: var(--g-bg-2);
-  border: 1px solid var(--g-line);
+  border-radius: 10px;
+  background: var(--g-fill);
 }
 .seg button {
   border: 0;
   background: transparent;
-  padding: 3px 10px;
-  border-radius: 7px;
-  font-size: 11.5px;
-  font-weight: 600;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
   color: var(--g-text-3);
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 .seg button.on {
-  background: var(--g-hover);
+  background: var(--g-fill-2);
   color: var(--g-text);
-  box-shadow: inset 0 1px 0 var(--g-hi);
 }
 .news {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.news li + li {
-  border-top: 1px solid var(--g-line);
-}
 .news a {
   display: block;
   padding: 8px 0;
   text-decoration: none;
   color: var(--g-text);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.45;
 }
 .news a:hover .nt {
@@ -429,15 +436,16 @@ body {
 .news .ns {
   display: block;
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--g-text-3);
 }
 .summary {
   margin: 0 0 8px;
   padding: 10px 12px;
-  border-radius: 12px;
-  background: var(--g-bg-2);
-  font-size: 12.5px;
+  border-radius: 14px;
+  background: var(--g-fill);
+  font-size: 13px;
   line-height: 1.55;
   color: var(--g-text-2);
 }
@@ -449,14 +457,15 @@ body {
 }
 .en-expr .e {
   flex: 1;
-  font-size: 18px;
-  font-weight: 650;
-  line-height: 1.35;
-  letter-spacing: -0.02em;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.32;
+  letter-spacing: -0.03em;
 }
 .en-mean {
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--g-text-2);
 }
 .dialog {
@@ -472,36 +481,66 @@ body {
 }
 .line .who {
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   display: grid;
   place-items: center;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-  background: var(--g-bg-2);
+  background: var(--g-fill-2);
   color: var(--g-text-2);
 }
 .line .en {
-  font-size: 13px;
+  font-size: 13.5px;
+  font-weight: 600;
   line-height: 1.45;
 }
 .line .ko {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--g-text-3);
 }
 .line .play {
   margin-left: auto;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
 }
 
 .foot {
   display: flex;
   justify-content: space-between;
   margin-top: 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--g-text-3);
+}
+
+/* 잠금 */
+.locked {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--g-text-2);
+}
+.locked > div {
+  flex: 1;
+}
+.locked b {
+  display: block;
+  color: var(--g-text);
+  font-size: 15px;
+}
+.locked span {
+  font-size: 12.5px;
+}
+.pill-btn {
+  border: 0;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--g-accent);
+  color: var(--g-on-accent);
+  font-weight: 700;
+  font-size: 13px;
 }
 
 /* 편집 모드: 창 전체를 끌어서 옮긴다 */
@@ -513,29 +552,30 @@ body.edit #root a {
   -webkit-app-region: no-drag;
 }
 body.edit .card {
-  outline: 1.5px dashed var(--g-accent);
+  outline: 2px dashed var(--g-accent);
   outline-offset: 2px;
 }
 .edit-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px 10px 14px;
-  border-radius: 14px;
+  padding: 10px 10px 10px 16px;
+  border-radius: 999px;
   background: var(--g-accent);
-  color: #111;
-  font-size: 12.5px;
-  font-weight: 600;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
 }
 .edit-bar span {
   flex: 1;
 }
 .edit-bar button {
   border: 0;
-  border-radius: 8px;
-  padding: 5px 10px;
-  background: rgb(0 0 0 / 0.85);
-  color: #fff;
-  font-weight: 600;
-  font-size: 12px;
+  border-radius: 999px;
+  height: 30px;
+  padding: 0 12px;
+  background: #fff;
+  color: #1b64da;
+  font-weight: 700;
+  font-size: 12.5px;
 }

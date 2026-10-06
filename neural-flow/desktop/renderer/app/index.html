@@ -4,16 +4,26 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://*.googleusercontent.com"
     />
     <title>neural-flow</title>
     <link rel="stylesheet" href="../shared/tokens.css" />
     <link rel="stylesheet" href="app.css" />
   </head>
   <body>
-    <div class="shell">
+    <div id="lock" hidden></div>
+    <div class="shell" id="shell">
       <aside class="side" id="side"></aside>
-      <main class="main" id="main"></main>
+      <main class="main" id="main">
+        <!-- 언제든 입력: 모든 화면 상단에 고정 (다시 그리지 않아 입력이 끊기지 않는다) -->
+        <form class="ask" id="ask" autocomplete="off">
+          <svg class="i" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          <input id="ask-input" placeholder="무엇이든 적어보세요 — 내일 3시 커피챗 · !자소서 끝내기 · 메모: …" />
+          <kbd id="ask-kbd"></kbd>
+        </form>
+        <div id="ask-preview"></div>
+        <div id="view"></div>
+      </main>
     </div>
     <dialog id="modal" class="modal"></dialog>
     <div id="toast" class="toast" role="status"></div>

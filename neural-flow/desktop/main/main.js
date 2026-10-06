@@ -26,6 +26,10 @@ const brain = require('./brain.js')
 const { pullRemote } = require('./calendar.js')
 const { pullNews } = require('./news.js')
 const { createScheduler } = require('./scheduler.js')
+const google = require('./google.js')
+const { interpret } = require('./input.js')
+const { detectClaude, providerOf } = require('./llm.js')
+const { pinToDesktop } = require('./win-desktop.js')
 
 const ROOT = path.join(__dirname, '..')
 const PRELOAD = path.join(ROOT, 'preload.js')
@@ -44,8 +48,40 @@ let store
 let widget = null
 let manager = null
 let tray = null
+let quick = null
 let widgetMode = 'pinned' // pinned(바탕화면 고정) | edit(이동·상호작용)
+let desktopPin = null // Windows Win+D 보호
+let claudeVersion = null // 노트북에 설치된 Claude Code 버전 (없으면 null)
 const busy = {}
+
+// ── 비밀값 암호화 (OS 키체인) ────────────────────────────────────────────────
+const enc = (v) => (v && safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(v).toString('base64') : v ? 'raw:' + v : '')
+function dec(v) {
+  if (!v) return ''
+  if (v.startsWith('raw:')) return v.slice(4)
+  try {
+    return safeStorage.decryptString(Buffer.from(v.replace(/^enc:/, ''), 'base64'))
+  } catch {
+    return ''
+  }
+}
+
+// ── 로그인 (허용된 구글 계정만) ──────────────────────────────────────────────
+const locked = () => store.get().settings.requireLogin !== false && !store.get().account?.email
+let gclient = null
+function googleClient() {
+  const d = store.get()
+  if (!d.account?.refreshEnc) return null
+  if (!gclient) {
+    const g = d.settings.google
+    gclient = new google.GoogleClient({
+      clientId: g.clientId,
+      clientSecret: dec(g.clientSecretEnc) || g.clientSecretPlain,
+      refreshToken: dec(d.account.refreshEnc),
+    })
+  }
+  return gclient
+}
 
 // ── 키 관리: safeStorage(OS 키체인) 암호화 → 평문 폴백 → 환경변수/.env ─────────
 function readDotenvKey() {
@@ -82,21 +118,47 @@ function setKey(key) {
   })
 }
 
+// 엔진 결정: auto = Claude Code(노트북에 설치돼 있으면) → Gemini 키 → 규칙
 function llm() {
-  return { key: getKey().key, model: store.get().settings.geminiModel || 'gemini-2.5-flash' }
+  const s = store.get().settings
+  const key = getKey().key
+  const base = { key, model: s.geminiModel || 'gemini-2.5-flash', claudeCmd: process.env.NF_CLAUDE_CMD || s.claudeCmd, claudeModel: s.claudeModel }
+  const engine = s.engine || 'auto'
+  if (engine === 'off') return { ...base, provider: 'none' }
+  if (engine === 'claude') return { ...base, provider: 'claude' }
+  if (engine === 'gemini') return { ...base, provider: key ? 'gemini' : 'none' }
+  return { ...base, provider: claudeVersion ? 'claude' : key ? 'gemini' : 'none' }
 }
 
 // ── 화면에 보낼 스냅샷 (비밀값 제외) ─────────────────────────────────────────
 function snapshot() {
   const d = store.get()
-  const { geminiKeyEnc, geminiKeyPlain, ...settings } = d.settings
+  const { geminiKeyEnc, geminiKeyPlain, google: g, ...settings } = d.settings
   const k = getKey()
-  return {
+  const { clientSecretEnc, clientSecretPlain, ...gPublic } = g
+  const base = {
     today: A.ymd(new Date()),
     platform: process.platform,
-    widgetMode,
+    locked: locked(),
+    account: d.account ? { email: d.account.email, name: d.account.name, picture: d.account.picture } : null,
     busy: { ...busy },
-    settings: { ...settings, hasKey: !!k.key, keySource: k.source },
+    widgetMode,
+  }
+  const pub = {
+    ...settings,
+    google: { ...gPublic, hasSecret: !!(clientSecretEnc || clientSecretPlain) },
+    hasKey: !!k.key,
+    keySource: k.source,
+    claudeVersion,
+    provider: providerOf(llm()),
+  }
+  // 잠겨 있으면 일정·활동 같은 개인 데이터는 화면에 보내지 않는다
+  if (base.locked) return { ...base, settings: pub, profile: { domains: [] } }
+  return {
+    ...base,
+    winDesktop: desktopPin ? desktopPin.status() : null,
+    notes: (d.notes || []).slice(-50),
+    settings: pub,
     profile: d.profile,
     events: d.events,
     activities: d.activities,
@@ -111,7 +173,7 @@ function snapshot() {
 }
 
 function broadcast() {
-  for (const w of [widget, manager]) if (w && !w.isDestroyed()) w.webContents.send('nf:changed')
+  for (const w of [widget, manager, quick]) if (w && !w.isDestroyed()) w.webContents.send('nf:changed')
 }
 
 function setBusy(job, on) {
@@ -207,12 +269,87 @@ async function runNews() {
   })
 }
 
+// 구글 캘린더(로그인) + ICS 주소(선택)를 합쳐 remote 로
 async function runCalendar() {
   return withBusy('calendar', async () => {
-    const urls = store.get().settings.icsUrls || []
-    const remote = await pullRemote(urls)
+    const s = store.get().settings
+    const remote = await pullRemote(s.icsUrls || [])
+    const gc = googleClient()
+    if (gc) {
+      try {
+        const cals = await gc.calendars()
+        const chosen = s.google.calendarIds ? cals.filter((c) => s.google.calendarIds.includes(c.id)) : cals.filter((c) => c.selected)
+        const now = new Date()
+        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 45)
+        const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 150)
+        const g = await gc.events(chosen, from, to)
+        remote.events.push(...g.events)
+        remote.errors.push(...g.errors.map((e) => ({ url: e.calendar, message: e.message })))
+        remote.calendars = cals
+      } catch (e) {
+        remote.errors.push({ url: 'Google', message: e.message })
+      }
+    }
     store.update((d) => (d.remote = remote))
   })
+}
+
+// ── 언제든 입력: 미리보기 → 확인 → 실행 ──────────────────────────────────────
+async function previewInput(text) {
+  const t = String(text || '').trim()
+  if (!t) return null
+  return withBusy('input', () => interpret(t, { today: A.ymd(new Date()), llm: llm(), profile: store.get().profile }))
+}
+
+function endOf(start, minutes) {
+  if (!start || !minutes) return null
+  const e = google.addMinutes(start, Number(minutes))
+  return typeof e === 'string' ? e : null // 자정을 넘기면 끝 시각은 비워 둔다
+}
+
+async function commitInput(item) {
+  const today = A.ymd(new Date())
+  const d = store.get()
+  const log = (msg) =>
+    store.update((x) => (x.inbox = [...(x.inbox || []), { at: new Date().toISOString(), kind: item.kind, title: item.title, result: msg }].slice(-100)))
+  if (item.kind === 'one_thing') {
+    store.update((x) => {
+      x.brief = { ...(x.brief && x.brief.date === today ? x.brief : { date: today, mode: 'daily' }), one_thing: item.title, done: false, source: 'manual' }
+      recordHistory(x, x.brief)
+    })
+    log('오늘의 단 하나로 정함')
+    return { ok: true, message: '오늘의 단 하나로 정했어요' }
+  }
+  if (item.kind === 'note') {
+    store.update((x) => (x.notes = [...(x.notes || []), { id: uid(), at: new Date().toISOString(), text: item.title }]))
+    log('메모 저장')
+    return { ok: true, message: '메모했어요' }
+  }
+  if (item.kind === 'task') {
+    store.update((x) =>
+      x.activities.push({ id: uid(), name: item.title, domain: item.domain || '', priority: '중간', energy: '가벼움', repeat: '1회', min: item.minutes || null, date: item.date || null, start: item.start || null, status: item.date ? '예정됨' : '승인됨', why: '빠른 입력' })
+    )
+    log('활동 보드에 추가')
+    return { ok: true, message: '활동 보드에 추가했어요' }
+  }
+  // event: 로그인돼 있으면 구글 캘린더, 아니면 앱 안 일정
+  const ev = { title: item.title, date: item.date || today, start: item.start || null, minutes: item.minutes || 60, note: '' }
+  const gc = item.target !== 'local' && googleClient()
+  if (gc) {
+    try {
+      await gc.createEvent(d.settings.google.defaultCalendar || 'primary', ev, Intl.DateTimeFormat().resolvedOptions().timeZone)
+      log('구글 캘린더에 추가')
+      runCalendar()
+      return { ok: true, message: '구글 캘린더에 추가했어요' }
+    } catch (e) {
+      log(`구글 실패 → 앱에 저장: ${e.message}`)
+    }
+  }
+  store.update((x) =>
+    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: endOf(ev.start, item.minutes), domain: item.domain || '', note: '', repeat: null, deadline: false, source: 'local' })
+  )
+  log('앱 일정에 추가')
+  return { ok: true, message: gc ? '구글 저장에 실패해 앱 일정에 넣었어요' : '일정에 추가했어요' }
 }
 
 const jobs = {
@@ -274,12 +411,16 @@ function createWidget() {
     if (IS_WIN) opts.focusable = false
     else opts.type = 'desktop'
   }
+  desktopPin?.stop()
+  desktopPin = null
   widget = new BrowserWindow(opts)
   if (IS_MAC) widget.setVisibleOnAllWorkspaces(true)
   widget.loadFile(path.join(ROOT, 'renderer', 'widget', 'index.html'))
   widget.once('ready-to-show', () => {
     if (store.get().settings.widget.visible !== false) widget.showInactive()
     applyClickThrough()
+    // Windows: Win+D(바탕화면 보기)에도 위젯이 남도록
+    if (IS_WIN && pinned) desktopPin = pinToDesktop(widget)
   })
   widget.on('moved', () => {
     const { x, y } = widget.getBounds()
@@ -339,6 +480,37 @@ function openManager(view) {
   manager.on('closed', () => (manager = null))
 }
 
+// ── 빠른 입력 창 (Spotlight 처럼) ────────────────────────────────────────────
+function toggleQuick() {
+  if (quick && !quick.isDestroyed() && quick.isVisible()) return quick.hide()
+  if (!quick || quick.isDestroyed()) {
+    const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+    quick = new BrowserWindow({
+      width: 640,
+      height: 360,
+      x: Math.round(wa.x + (wa.width - 640) / 2),
+      y: Math.round(wa.y + wa.height * 0.18),
+      frame: false,
+      transparent: true,
+      resizable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      show: false,
+      hasShadow: false,
+      backgroundColor: '#00000000',
+      webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
+    })
+    quick.loadFile(path.join(ROOT, 'renderer', 'quick', 'index.html'))
+    quick.on('blur', () => !TEST_HOOK && quick?.hide())
+    quick.on('closed', () => (quick = null))
+    quick.once('ready-to-show', () => quick.show())
+    return
+  }
+  quick.show()
+  quick.focus()
+  quick.webContents.send('nf:navigate', 'focus')
+}
+
 // ── 트레이 ───────────────────────────────────────────────────────────────────
 function trayImage() {
   const file = IS_MAC ? 'trayTemplate.png' : 'tray.png'
@@ -357,6 +529,7 @@ function buildTray() {
   const shortcut = IS_MAC ? '⌘⌥N' : 'Ctrl+Alt+N'
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      { label: `빠른 입력 (${IS_MAC ? '⌘⇧Space' : 'Ctrl+Shift+Space'})`, click: toggleQuick },
       { label: '열기 (오늘)', click: () => openManager('today') },
       { label: '캘린더', click: () => openManager('calendar') },
       { label: '활동 보드', click: () => openManager('board') },
@@ -386,7 +559,73 @@ function buildTray() {
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
 function registerIpc() {
+  // 잠겨 있을 때도 쓸 수 있는 채널만 열어 두고, 나머지는 로그인 전 거부
+  const OPEN = new Set(['nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open'])
+  const handle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = (ch, fn) =>
+    handle(ch, (...args) => {
+      if (!OPEN.has(ch) && locked()) throw new Error('로그인이 필요해요')
+      return fn(...args)
+    })
+
   ipcMain.handle('nf:snapshot', () => snapshot())
+
+  // 로그인 설정(클라이언트 ID/시크릿)은 잠금 화면에서 입력한다
+  ipcMain.handle('nf:auth:config', (_e, { clientId, clientSecret } = {}) => {
+    store.update((d) => {
+      if (clientId !== undefined) d.settings.google.clientId = String(clientId).trim()
+      if (clientSecret !== undefined) {
+        const v = enc(String(clientSecret).trim())
+        d.settings.google.clientSecretEnc = v
+        d.settings.google.clientSecretPlain = ''
+      }
+    })
+    gclient = null
+  })
+  ipcMain.handle('nf:auth:signin', async () => {
+    const g = store.get().settings.google
+    setBusy('signin', true)
+    try {
+      const r = await google.signIn({
+        clientId: g.clientId,
+        clientSecret: dec(g.clientSecretEnc) || g.clientSecretPlain,
+        allowedEmails: g.allowedEmails,
+        openUrl: (url) => (TEST_HOOK && process.env.NF_TEST_OPEN_URL === 'fetch' ? fetch(url).catch(() => {}) : shell.openExternal(url)),
+      })
+      store.update((d) => {
+        d.account = { email: r.email, name: r.name, picture: r.picture, refreshEnc: enc(r.refreshToken) }
+        if (!d.settings.google.allowedEmails?.length) d.settings.google.allowedEmails = [r.email] // 첫 로그인 계정을 주인으로
+      })
+      gclient = new google.GoogleClient({ clientId: g.clientId, clientSecret: dec(g.clientSecretEnc) || g.clientSecretPlain, refreshToken: r.refreshToken, accessToken: r.accessToken, expiresAt: r.expiresAt })
+      runCalendar()
+      return { ok: true, email: r.email }
+    } catch (e) {
+      return { ok: false, message: e.message }
+    } finally {
+      setBusy('signin', false)
+    }
+  })
+  ipcMain.handle('nf:auth:signout', () => {
+    gclient = null
+    store.update((d) => {
+      d.account = null
+      d.remote = { ...d.remote, events: (d.remote.events || []).filter((e) => e.source !== 'google') }
+    })
+  })
+
+  ipcMain.handle('nf:input:preview', (_e, text) => previewInput(text))
+  ipcMain.handle('nf:input:commit', (_e, item) => commitInput(item))
+  ipcMain.handle('nf:quick:hide', () => quick?.hide())
+  ipcMain.handle('nf:quick:open', () => toggleQuick())
+  ipcMain.handle('nf:google:delete', async (_e, calendarId, eventId) => {
+    await googleClient()?.deleteEvent(calendarId, eventId)
+    await runCalendar()
+  })
+  ipcMain.handle('nf:engine:detect', async () => {
+    claudeVersion = await detectClaude(process.env.NF_CLAUDE_CMD || store.get().settings.claudeCmd)
+    broadcast()
+    return claudeVersion
+  })
 
   ipcMain.handle('nf:event:save', (_e, ev) => {
     store.update((d) => {
@@ -479,17 +718,22 @@ function registerIpc() {
   ipcMain.handle('nf:settings:save', (_e, patch = {}) => {
     const icsBefore = JSON.stringify(store.get().settings.icsUrls) // 값으로 복사 (객체는 아래에서 바뀜)
     store.update((d) => {
-      const { widget: w, schedule: sc, ...rest } = patch
+      const { widget: w, schedule: sc, google: g, geminiKeyEnc, geminiKeyPlain, ...rest } = patch
       Object.assign(d.settings, rest)
       if (w) Object.assign(d.settings.widget, w)
       if (sc) Object.assign(d.settings.schedule, sc)
+      if (g) {
+        const { clientSecretEnc, clientSecretPlain, hasSecret, ...safe } = g // 시크릿은 nf:auth:config 로만
+        Object.assign(d.settings.google, safe)
+      }
     })
     const after = store.get().settings
     if (patch.widget?.theme) nativeTheme.themeSource = after.widget.theme === 'auto' ? 'system' : after.widget.theme
     if (patch.widget && 'width' in patch.widget) createWidget()
     if (patch.widget && 'clickThrough' in patch.widget) applyClickThrough()
     if ('autoStart' in patch) applyAutoStart()
-    if (icsBefore !== JSON.stringify(after.icsUrls)) runCalendar()
+    if (icsBefore !== JSON.stringify(after.icsUrls) || patch.google?.calendarIds !== undefined) runCalendar()
+    if (patch.engine || patch.claudeCmd) detectClaude(process.env.NF_CLAUDE_CMD || after.claudeCmd).then((v) => ((claudeVersion = v), broadcast()))
     buildTray()
   })
 
@@ -497,7 +741,7 @@ function registerIpc() {
     setKey(String(key || '').trim())
     if (!key) return { ok: true }
     try {
-      await brain.testKey(llm())
+      await brain.testKey({ ...llm(), provider: 'gemini' }) // 키 테스트는 항상 Gemini 로
       return { ok: true }
     } catch (e) {
       return { ok: false, message: e.message }
@@ -548,13 +792,25 @@ app.whenReady().then(async () => {
 
   globalShortcut.register('CommandOrControl+Alt+N', () => setWidgetMode(widgetMode === 'edit' ? 'pinned' : 'edit'))
   globalShortcut.register('CommandOrControl+Alt+M', () => openManager())
+  try {
+    globalShortcut.register(store.get().settings.quickShortcut || 'CommandOrControl+Shift+Space', toggleQuick)
+  } catch (e) {
+    console.warn('[quick] 단축키 등록 실패:', e.message)
+  }
+  // Claude Code 가 깔려 있는지 확인 (엔진 auto 일 때 우선 사용)
+  detectClaude(process.env.NF_CLAUDE_CMD || store.get().settings.claudeCmd).then((v) => {
+    claudeVersion = v
+    broadcast()
+  })
 
-  const scheduler = createScheduler(store, jobs)
+  // 잠겨 있는 동안(로그인 전)에는 자동 작업·알림을 돌리지 않는다
+  const lockedJobs = Object.fromEntries(Object.entries(jobs).map(([k, fn]) => [k, (...a) => (locked() ? undefined : fn(...a))]))
+  const scheduler = createScheduler(store, lockedJobs)
   if (!TEST_HOOK) scheduler.start()
   // 절전 복귀·화면 구성 변경 시 날짜/위치 갱신
   powerMonitor.on('resume', () => scheduler.tick())
   screen.on('display-removed', () => createWidget())
 
-  if (DEV) openManager('today')
-  if (TEST_HOOK) require(path.resolve(TEST_HOOK)).run({ app, store, getWidget: () => widget, openManager, getManager: () => manager, setWidgetMode, jobs })
+  if (DEV || locked()) openManager('today')
+  if (TEST_HOOK) require(path.resolve(TEST_HOOK)).run({ app, store, getWidget: () => widget, openManager, getManager: () => manager, setWidgetMode, jobs, toggleQuick, getQuick: () => quick })
 })

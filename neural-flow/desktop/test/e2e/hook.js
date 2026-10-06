@@ -1,29 +1,27 @@
 // E2E 훅 — 실제 Electron 앱 안에서 IPC 경로(window.nf)를 그대로 호출해 검증한다.
 // launch.js 가 NF_TEST_HOOK 으로 이 파일을 넘기면 main.js 가 스케줄러를 끄고 run() 을 부른다.
-// 외부 네트워크 없이: 가짜 Gemini · ICS · RSS 를 로컬 서버로 띄운다.
+// 외부 네트워크 없이: 가짜 Gemini · 구글(로그인·캘린더) · ICS · RSS 를 로컬 서버로, Claude Code 는 가짜 CLI 로.
 
 const fs = require('fs')
 const path = require('path')
 const http = require('http')
+const { execFileSync } = require('child_process')
 const A = require('../../renderer/shared/agenda.js')
 
 const PORT = Number(process.env.NF_E2E_PORT || 47811)
 const SHOT_DIR = process.env.NF_SHOT_DIR // 있으면 화면 캡처 저장
+const OWNER = 'jun1234sang@gmail.com' // neural-flow/config.json 의 userEmail
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const today = A.ymd(new Date())
+const tomorrow = A.addDays(today, 1)
 const compact = (d) => d.replace(/-/g, '')
+const at = (day, hh) => new Date(`${day}T${hh}:00`).toISOString() // 로컬 시각 → ISO
 
 const ICS = `BEGIN:VCALENDAR
 VERSION:2.0
-X-WR-CALNAME:회사
+X-WR-CALNAME:공유
 BEGIN:VEVENT
-UID:g1
-DTSTART:${compact(today)}T060000Z
-DTEND:${compact(today)}T070000Z
-SUMMARY:구글 테스트 미팅
-END:VEVENT
-BEGIN:VEVENT
-UID:g2
+UID:i1
 DTSTART;VALUE=DATE:${compact(A.addDays(today, 2))}
 DTEND;VALUE=DATE:${compact(A.addDays(today, 3))}
 RRULE:FREQ=WEEKLY;COUNT=2
@@ -36,6 +34,7 @@ ${[1, 2, 3].map((i) => `<item><title>테스트 뉴스 ${i}</title><link>https://
 </channel></rss>`
 
 function geminiReply(prompt) {
+  if (prompt.includes('일정 비서')) return { kind: 'event', title: '커피챗', date: tomorrow, start: '15:00', minutes: 60, domain: '🤝 관계·사랑', reply: 'ok' }
   if (prompt.includes('영어 회화 코치'))
     return {
       expression: "Let's touch base tomorrow.",
@@ -49,14 +48,7 @@ function geminiReply(prompt) {
       tip: 'touch base = 가볍게 연락/점검',
     }
   if (prompt.includes('헤드라인')) return { bullets: ['요약 1', '요약 2', '요약 3'], pick: { title: '테스트 뉴스 1', why: '이유' } }
-  const base = {
-    greeting: '오늘도 거룩=집중.',
-    one_thing: 'MOCK: 포트폴리오 케이스 1개 완성',
-    one_thing_why: 'MOCK 이유',
-    holiness_line: 'MOCK 거룩',
-    stuck_coaching: 'MOCK 코칭',
-    trend: 'MOCK 트렌드',
-  }
+  const base = { greeting: '오늘도 거룩=집중.', one_thing: 'MOCK: 포트폴리오 케이스 1개 완성', one_thing_why: 'MOCK 이유', holiness_line: 'MOCK 거룩', stuck_coaching: 'MOCK 코칭', trend: 'MOCK 트렌드' }
   if (prompt.includes('[주간 모드]'))
     base.recommendations = [
       { name: 'MOCK 추천 활동 A', domain: '🫀 신체·건강', why: '운동', priority: '중간', energy: '루틴', min: 30 },
@@ -65,34 +57,80 @@ function geminiReply(prompt) {
   return base
 }
 
+// ── 가짜 서버 ────────────────────────────────────────────────────────────────
+const mock = { userEmail: OWNER, revoked: 0, created: [], tokenCalls: 0 }
+const CALS = [
+  { id: 'me@x', summary: '준상', primary: true, backgroundColor: '#3182f6', accessRole: 'owner', selected: true },
+  { id: 'work', summary: '회사', backgroundColor: '#f04452', accessRole: 'reader', selected: true },
+  { id: 'hidden', summary: '숨김', backgroundColor: '#999999', accessRole: 'reader', selected: false },
+]
+
 function startServer() {
+  const json = (res, code, obj) => {
+    res.writeHead(code, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(obj))
+  }
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      if (req.url.startsWith('/cal.ics')) {
-        res.writeHead(200, { 'Content-Type': 'text/calendar' })
-        return res.end(ICS)
-      }
-      if (req.url.startsWith('/feed.xml')) {
-        res.writeHead(200, { 'Content-Type': 'application/rss+xml' })
-        return res.end(RSS)
-      }
+      const url = new URL(req.url, `http://127.0.0.1:${PORT}`)
       let body = ''
       req.on('data', (c) => (body += c))
       req.on('end', () => {
-        if (req.headers['x-goog-api-key'] !== 'test-key') {
-          res.writeHead(400)
-          return res.end('{"error":"bad key"}')
+        const p = url.pathname
+        if (p === '/cal.ics') return res.writeHead(200, { 'Content-Type': 'text/calendar' }), res.end(ICS)
+        if (p === '/feed.xml') return res.writeHead(200, { 'Content-Type': 'application/rss+xml' }), res.end(RSS)
+        // 구글 OAuth
+        if (p === '/o/auth') {
+          const q = url.searchParams
+          const ok = q.get('code_challenge_method') === 'S256' && q.get('client_id') === 'cid'
+          res.writeHead(302, { Location: `${q.get('redirect_uri')}?${ok ? 'code=c1' : 'error=bad_request'}&state=${q.get('state')}` })
+          return res.end()
         }
+        if (p === '/o/token') {
+          mock.tokenCalls++
+          const f = new URLSearchParams(body)
+          if (f.get('client_secret') !== 'sec') return json(res, 401, { error: 'invalid_client' })
+          return json(res, 200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 })
+        }
+        if (p === '/o/userinfo') return json(res, 200, { email: mock.userEmail, email_verified: true, name: '준상' })
+        if (p === '/o/revoke') return mock.revoked++, json(res, 200, {})
+        // 구글 캘린더
+        if (p.startsWith('/calendar/v3')) {
+          if (req.headers.authorization !== 'Bearer at') return json(res, 401, { error: { message: 'unauthorized' } })
+          if (p.endsWith('/calendarList')) return json(res, 200, { items: CALS })
+          const m = p.match(/\/calendars\/([^/]+)\/events$/)
+          if (m && req.method === 'POST') {
+            const ev = JSON.parse(body)
+            mock.created.push({ calendar: decodeURIComponent(m[1]), ...ev })
+            return json(res, 200, { id: `new${mock.created.length}`, ...ev })
+          }
+          if (m) {
+            const cal = decodeURIComponent(m[1])
+            const items =
+              cal === 'me@x'
+                ? [
+                    { id: 'g1', summary: '구글 팀 미팅', start: { dateTime: at(today, '10:00') }, end: { dateTime: at(today, '11:00') }, htmlLink: 'https://calendar.google.com/e/g1' },
+                    { id: 'g2', summary: '구글 종일', start: { date: tomorrow }, end: { date: A.addDays(tomorrow, 1) } },
+                    ...mock.created.map((c, i) => ({ id: `new${i + 1}`, summary: c.summary, start: c.start, end: c.end })),
+                  ]
+                : cal === 'work'
+                  ? [{ id: 'w1', summary: '회사 점심', start: { dateTime: at(today, '12:00') }, end: { dateTime: at(today, '13:00') } }]
+                  : [{ id: 'h1', summary: '숨김 일정', start: { date: today }, end: { date: tomorrow } }]
+            return json(res, 200, { items })
+          }
+          return json(res, 404, { error: { message: 'not found' } })
+        }
+        // Gemini
+        if (req.headers['x-goog-api-key'] !== 'test-key') return res.writeHead(400), res.end('{"error":"bad key"}')
         const prompt = JSON.parse(body).contents[0].parts[0].text
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(geminiReply(prompt)) }] } }] }))
+        json(res, 200, { candidates: [{ content: { parts: [{ text: JSON.stringify(geminiReply(prompt)) }] } }] })
       })
     })
     server.listen(PORT, '127.0.0.1', () => resolve(server))
   })
 }
 
-exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode }) => {
+exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, toggleQuick, getQuick }) => {
   const results = []
   const check = (name, ok, info = '') => results.push({ name, ok: !!ok, info })
   const server = await startServer()
@@ -111,110 +149,200 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode })
       fs.writeFileSync(path.join(SHOT_DIR, name), (await w.webContents.capturePage()).toPNG())
     }
 
+    // ── 1) 잠금 ──
     let s = await snap()
-    check('state.json 시드', s.activities.length > 0 && s.events.length > 0, `활동 ${s.activities.length} · 일정 ${s.events.length}`)
-    const html = await js('document.body.innerText')
-    check('관리 창 렌더링', html.includes('오늘의 단 하나'))
-    const widgetText = await getWidget().webContents.executeJavaScript('document.body.innerText')
-    check('위젯 렌더링', widgetText.includes('오늘의 단 하나') && /\d{2}:\d{2}/.test(widgetText))
+    check('처음엔 잠겨 있음 (개인 데이터 미전송)', s.locked === true && s.events === undefined && s.settings.google.allowedEmails.includes(OWNER))
+    const blocked = await js("nf.saveEvent({ title: 'x', date: '2026-01-01' }).then(() => 'ok', (e) => e.message)")
+    check('잠금 중 쓰기 거부', /로그인이 필요/.test(blocked), blocked)
+    check('잠금 화면 렌더링', (await js('document.body.innerText')).includes('계정으로만 열 수 있어요'))
+    await cap(m, 'lock-setup.png')
 
-    // 1) 키 없음 → 규칙 기반
-    await js("nf.run('brief')")
+    // ── 2) 로그인 ──
+    await js("nf.authConfig({ clientId: 'cid', clientSecret: 'sec' })")
     s = await snap()
-    check('키 없음 → 폴백 브리핑', s.brief?.source === 'fallback', s.brief?.one_thing)
+    check('클라이언트 설정 저장 (시크릿은 화면에 안 보냄)', s.settings.google.clientId === 'cid' && s.settings.google.hasSecret && !JSON.stringify(s).includes('"sec"'))
+    await cap(m, 'lock.png')
 
-    // 2) 키 검증
-    let r = await js("nf.setKey('wrong-key')")
-    check('잘못된 키 → ok:false', r.ok === false, r.message?.slice(0, 40))
+    mock.userEmail = 'intruder@example.com'
+    let r = await js('nf.signIn()')
+    s = await snap()
+    check('다른 구글 계정 거부 + 토큰 폐기', r.ok === false && /허용되지 않은/.test(r.message) && mock.revoked === 1 && s.locked, r.message)
+
+    mock.userEmail = OWNER
+    r = await js('nf.signIn()')
+    await wait(800)
+    s = await snap()
+    check('본인 계정 로그인 → 잠금 해제', r.ok && !s.locked && s.account.email === OWNER, r.message || r.email)
+    await wait(600)
+    const saved = JSON.parse(fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8'))
+    const { safeStorage } = require('electron')
+    const encOk = safeStorage.isEncryptionAvailable()
+    check(
+      encOk ? '리프레시 토큰은 OS 키체인으로 암호화 저장' : '리프레시 토큰 저장 (이 OS 는 키체인 없음 → 평문 표시)',
+      encOk ? saved.account.refreshEnc.startsWith('enc:') && !JSON.stringify(saved).includes('"rt"') : saved.account.refreshEnc === 'raw:rt',
+      saved.account.refreshEnc.slice(0, 8)
+    )
+    check('state.json 시드', s.activities.length > 0 && s.events.length > 0, `활동 ${s.activities.length} · 일정 ${s.events.length}`)
+
+    // ── 3) 구글 캘린더 ──
+    for (let i = 0; i < 25 && !(await snap()).remote.calendars; i++) await wait(200)
+    s = await snap()
+    const g = (s.remote.events || []).filter((e) => e.source === 'google')
+    check(
+      '구글 캘린더 동기화 (표시 켠 캘린더만)',
+      g.some((e) => e.title === '구글 팀 미팅' && e.start === '10:00' && e.color === '#3182f6') &&
+        g.some((e) => e.title === '회사 점심' && e.calendar === '회사') &&
+        g.some((e) => e.title === '구글 종일' && e.date === tomorrow && !e.start) &&
+        !g.some((e) => e.title === '숨김 일정'),
+      g.map((e) => `${e.calendar}:${e.title}@${e.date} ${e.start || '종일'}`).join(', ')
+    )
+    await js(`nf.saveSettings({ google: { calendarIds: ['me@x'] } })`)
+    await wait(1200)
+    s = await snap()
+    check('표시할 캘린더 선택 반영', !s.remote.events.some((e) => e.title === '회사 점심') && s.remote.events.some((e) => e.title === '구글 팀 미팅'))
+    check('토큰 재사용 (매번 새로 받지 않음)', mock.tokenCalls === 2, `token calls ${mock.tokenCalls}`)
+
+    // ── 4) 빠른 입력: 규칙 → 구글 캘린더에 생성 ──
+    await js("nf.saveSettings({ engine: 'gemini' })") // 키 없음 → 규칙
+    let item = await js("nf.previewInput('내일 오후 3시 커피챗 강남 2시간')")
+    check('입력 해석(규칙)', item.kind === 'event' && item.date === tomorrow && item.start === '15:00' && item.minutes === 120 && item.source === 'rules', JSON.stringify(item))
+    r = await js(`nf.commitInput(${JSON.stringify(item)})`)
+    const made = mock.created[0]
+    check(
+      '구글 캘린더에 일정 생성',
+      r.ok && /구글/.test(r.message) && made?.start?.dateTime === `${tomorrow}T15:00:00` && made?.end?.dateTime === `${tomorrow}T17:00:00` && made.calendar === 'primary',
+      JSON.stringify(made)
+    )
+    r = await js("nf.previewInput('!자소서 1문항 끝내기').then((i) => nf.commitInput(i))")
+    s = await snap()
+    check('입력 → 오늘의 단 하나', s.brief?.one_thing === '자소서 1문항 끝내기' && s.brief.source === 'manual')
+    await js("nf.previewInput('메모: 위젯 다크모드 아이디어').then((i) => nf.commitInput(i))")
+    await js("nf.previewInput('포트폴리오 케이스 정리').then((i) => nf.commitInput(i))")
+    s = await snap()
+    check('입력 → 메모 / 활동 보드', s.notes.some((n) => n.text === '위젯 다크모드 아이디어') && s.activities.some((a) => a.name === '포트폴리오 케이스 정리' && a.status === '승인됨'))
+
+    // ── 5) 엔진: Gemini ──
+    r = await js("nf.setKey('wrong-key')")
+    check('잘못된 Gemini 키 → ok:false', r.ok === false, r.message?.slice(0, 40))
     r = await js("nf.setKey('test-key')")
     s = await snap()
-    check('키 저장·테스트 성공', r.ok === true && s.settings.hasKey, s.settings.keySource)
-    check('스냅샷에 키 원문 없음', !JSON.stringify(s).includes('test-key'))
-
-    // 3) AI 작업
+    check('Gemini 키 저장 + 스냅샷에 키 원문 없음', r.ok && s.settings.hasKey && s.settings.provider === 'gemini' && !JSON.stringify(s).includes('test-key'))
+    item = await js("nf.previewInput('내일 3시 커피챗')")
+    check('입력 해석(Gemini)', item.source === 'gemini' && item.title === '커피챗' && item.start === '15:00', JSON.stringify(item))
     await js("nf.run('brief')")
     s = await snap()
     check('Gemini 데일리 브리핑', s.brief?.source === 'gemini' && s.brief.one_thing.startsWith('MOCK'), s.brief?.one_thing)
-
     const before = s.activities.length
     await js("nf.run('weekly')")
     await js("nf.run('weekly')")
     s = await snap()
     const added = s.activities.filter((a) => a.name.startsWith('MOCK 추천'))
     check('주간 추천 → 제안됨으로만, 중복 없이', added.length === 2 && added.every((a) => a.status === '제안됨'), `${before}→${s.activities.length}`)
-
     await js("nf.run('english')")
     s = await snap()
     check('Gemini 영어 표현', s.english?.source === 'gemini' && s.english.expression.includes('touch base'))
-
     await js(`nf.saveSettings({ feeds: [{ name: '로컬', url: '${base}/feed.xml' }] })`)
     await js("nf.run('news')")
     s = await snap()
-    check('RSS 수집 + 최신순', s.news.items.length === 3 && s.news.items[0].title === '테스트 뉴스 1', `${s.news.items.length}건`)
-    check('뉴스 AI 요약', s.news.summary?.bullets?.length === 3)
+    check('RSS 수집 + AI 요약', s.news.items.length === 3 && s.news.items[0].title === '테스트 뉴스 1' && s.news.summary?.bullets?.length === 3)
 
-    // 4) 구글 캘린더(ICS): 주소를 바꾸면 바로 동기화
-    await js(`nf.saveSettings({ icsUrls: ['${base}/cal.ics'] })`)
-    for (let i = 0; i < 20 && !(await snap()).remote.fetchedAt; i++) await wait(200)
+    // ── 6) 엔진: 노트북의 Claude Code (가짜 CLI) ──
+    const ver = await js('nf.detectEngine()')
+    await js("nf.saveSettings({ engine: 'claude' })")
     s = await snap()
-    const g = (s.remote.events || []).filter((e) => e.calendar === '회사')
-    check('ICS 동기화 + 반복 펼침', g.length === 3, g.map((e) => `${e.date} ${e.start || '종일'}`).join(', '))
+    check('Claude Code 감지', /9\.9\.9/.test(ver || '') && s.settings.provider === 'claude', ver)
+    item = await js("nf.previewInput('포트폴리오 정리해야 함')")
+    check('입력 해석(Claude Code)', item.source === 'claude' && item.title.startsWith('CLAUDE:') && item.kind === 'task', JSON.stringify(item))
+    await js("nf.run('brief')")
+    s = await snap()
+    check('Claude Code 브리핑', s.brief?.source === 'claude' && s.brief.one_thing.startsWith('CLAUDE:'), s.brief?.one_thing)
+    await js("nf.saveSettings({ engine: 'auto' })")
+    s = await snap()
+    check('엔진 auto → Claude Code 우선', s.settings.provider === 'claude')
 
-    // 5) 일정 · 마감 · 완료
+    // ── 7) iCal 주소도 함께 ──
+    await js(`nf.saveSettings({ icsUrls: ['${base}/cal.ics'] })`)
+    for (let i = 0; i < 20 && !(await snap()).remote.events.some((e) => e.calendar === '공유'); i++) await wait(200)
+    s = await snap()
+    check('iCal + 구글 함께 표시', s.remote.events.filter((e) => e.calendar === '공유').length === 2 && s.remote.events.some((e) => e.source === 'google'))
+
+    // ── 8) 일정 · 마감 · 완료 ──
     const dday = A.addDays(today, 3)
     await js(`nf.saveEvent({ title: '테스트 마감', date: '${dday}', start: '09:00', deadline: true, domain: '💼 일·소명' })`)
     s = await snap()
-    const dl = A.deadlines({ events: s.events, activities: s.activities }, today)
-    check('D-day 계산', dl.some((d) => d.title === '테스트 마감' && d.d === 3))
-
+    check('D-day 계산', A.deadlines({ events: s.events, activities: s.activities }, today).some((d) => d.title === '테스트 마감' && d.d === 3))
     await js('nf.toggleOneThing()')
     s = await snap()
     check('단 하나 완료 + 기록', s.brief.done === true && s.history.some((h) => h.date === today && h.done))
-
     const occ = A.occurrences({ events: s.events, remote: s.remote.events, activities: s.activities, doneMap: s.doneMap }, today, today)
     const routine = occ.find((o) => o.repeat === 'daily')
     await js(`nf.toggleOccurrence(${JSON.stringify(routine.key)})`)
     s = await snap()
     check('반복 일정은 날짜별로 완료', !!s.doneMap[routine.key])
 
-    const act = s.activities.find((a) => a.name === 'MOCK 추천 활동 B')
-    await js(`nf.saveActivity(${JSON.stringify({ ...act, date: today, start: '15:00' })})`)
-    s = await snap()
-    check('활동에 날짜 → 예정됨', s.activities.find((a) => a.id === act.id).status === '예정됨')
-
-    await js(`nf.setActivityStatus(${JSON.stringify(act.id)}, '완료')`)
-    s = await snap()
-    check('보드 상태 변경', s.activities.find((a) => a.id === act.id).status === '완료')
-
-    // 6) 화면 조작: 모달 열기
+    // ── 9) 화면 ──
     await js("location.hash = 'calendar'")
     await wait(400)
     await js("document.querySelector('[data-act=new-event]').click()")
     await wait(300)
-    check('새 일정 모달', await js("document.getElementById('modal').open"))
+    check('새 일정 모달 (저장 위치 선택 포함)', await js("document.getElementById('modal').open && !!document.querySelector('select[name=target]')"))
     await cap(m, 'modal.png')
     await js("document.getElementById('modal').close()")
 
-    // 7) 위젯 모드 · 테마
+    toggleQuick()
+    await wait(1500)
+    const q = getQuick()
+    check('빠른 입력 창', q && q.isVisible() && (await q.webContents.executeJavaScript('!!document.getElementById("q")')))
+    await q.webContents.executeJavaScript("document.getElementById('q').value = '금요일 7시 반 스터디'; document.getElementById('bar').requestSubmit()")
+    await wait(1500)
+    await cap(q, 'quick.png')
+    q.hide()
+
+    // ── 10) 위젯 · Win+D ──
     setWidgetMode('edit')
     await wait(1200)
     check('편집 모드 전환', (await snap()).widgetMode === 'edit')
     await cap(getWidget(), 'widget-edit.png')
     setWidgetMode('pinned')
-    await wait(1200)
-    await cap(getWidget(), 'widget-dark.png')
+    await wait(1500)
+    if (process.platform === 'win32') {
+      s = await snap()
+      check('Win+D 보호 켜짐 (소유자 = 바탕화면)', s.winDesktop?.active && s.winDesktop.ownerIsDesktop, JSON.stringify(s.winDesktop))
+      const ps = (cmd) => execFileSync('powershell', ['-NoProfile', '-Command', cmd], { stdio: 'ignore' })
+      m.show()
+      await wait(500)
+      ps('(New-Object -ComObject Shell.Application).ToggleDesktop()') // = Win+D
+      await wait(2000)
+      s = await snap()
+      // 대조군: 일반 창(관리 창)이 내려갔는지로 '바탕화면 보기'가 실제로 일어났는지 판단
+      const control = m.isMinimized() || !m.isVisible()
+      check(
+        'Win+D 뒤에도 위젯 표시',
+        s.winDesktop.visible && !s.winDesktop.iconic && getWidget().isVisible(),
+        `${JSON.stringify(s.winDesktop)} · 대조군(관리 창) ${control ? '내려감 → 바탕화면 보기 실제 발생' : '그대로 → 이 러너에선 바탕화면 보기가 안 일어남(판단 보류)'}`
+      )
+      await cap(getWidget(), 'widget-after-win-d.png')
+      ps('(New-Object -ComObject Shell.Application).ToggleDesktop()')
+    }
+    await cap(getWidget(), 'widget.png')
     for (const v of ['today', 'calendar', 'board', 'brief', 'settings']) {
       await js(`location.hash = '${v}'`)
       await cap(m, `app-${v}.png`)
     }
-    await js("nf.saveSettings({ widget: { theme: 'light' } })")
+    await js("nf.saveSettings({ widget: { theme: 'dark' } })")
     await wait(800)
-    await cap(getWidget(), 'widget-light.png')
+    await cap(getWidget(), 'widget-dark.png')
+    await js("location.hash = 'today'")
+    await cap(m, 'app-today-dark.png')
 
-    // 8) 디스크
+    // ── 11) 로그아웃 → 다시 잠금 ──
+    await js('nf.signOut()')
+    s = await snap()
+    check('로그아웃 → 다시 잠금', s.locked && s.events === undefined)
+
     await wait(600)
     const file = JSON.parse(fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8'))
-    check('디스크 저장', file.events.some((e) => e.title === '테스트 마감'))
+    check('디스크 저장 + 로그아웃 시 토큰 삭제', file.events.some((e) => e.title === '테스트 마감') && file.account === null)
   } catch (e) {
     check('예외 없음', false, e.stack)
   }

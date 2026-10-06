@@ -1,46 +1,10 @@
 // THINK — agent.py 의 think() 를 옮긴 것 + 영어 회화 브리핑 + 뉴스 요약.
-// Gemini 키가 없거나 호출이 실패해도 결정론적 폴백으로 항상 결과를 낸다 (앱이 죽지 않게).
+// LLM(Gemini·Claude Code)이 없거나 호출이 실패해도 결정론적 폴백으로 항상 결과를 낸다 (앱이 죽지 않게).
 
 const A = require('../renderer/shared/agenda.js')
 const { ENGLISH_FALLBACK } = require('./english-fallback.js')
 
-const GEMINI_BASE = process.env.NF_GEMINI_BASE || 'https://generativelanguage.googleapis.com' // 테스트용 교체 가능
-const GEMINI_URL = (model) => `${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent`
-
-async function callGemini({ key, model }, prompt, { temperature = 0.4, timeoutMs = 45000 } = {}) {
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetch(GEMINI_URL(model), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature, responseMimeType: 'application/json' },
-      }),
-      signal: ctrl.signal,
-    })
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
-    const json = await res.json()
-    const text = json?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || ''
-    return parseJson(text)
-  } finally {
-    clearTimeout(t)
-  }
-}
-
-function parseJson(raw) {
-  let s = String(raw || '').trim()
-  if (s.startsWith('```')) s = s.replace(/^```(?:json)?/, '').replace(/```$/, '').trim()
-  try {
-    return JSON.parse(s)
-  } catch {
-    const a = s.indexOf('{')
-    const b = s.lastIndexOf('}')
-    if (a >= 0 && b > a) return JSON.parse(s.slice(a, b + 1))
-    throw new Error('JSON 파싱 실패')
-  }
-}
+const { callJson, providerOf, ready } = require('./llm.js')
 
 // ── 데일리/위클리 브리핑 ──────────────────────────────────────────────────────
 function balance(profile, activities) {
@@ -121,11 +85,11 @@ function fallbackBrief(data, today, deadlines) {
 
 async function makeBrief(data, llm, { today, mode, todayAgenda, deadlines }) {
   const base = { date: today, mode, done: false, createdAt: new Date().toISOString() }
-  if (!llm.key) return { ...base, ...fallbackBrief(data, today, deadlines), source: 'fallback' }
+  if (!ready(llm)) return { ...base, ...fallbackBrief(data, today, deadlines), source: 'fallback' }
   try {
-    const out = await callGemini(llm, buildBriefPrompt(data, today, mode, todayAgenda, deadlines))
+    const out = await callJson(llm, buildBriefPrompt(data, today, mode, todayAgenda, deadlines))
     if (!out.one_thing) throw new Error('one_thing 없음')
-    return { ...base, ...out, source: 'gemini' }
+    return { ...base, ...out, source: providerOf(llm) }
   } catch (e) {
     console.warn('[brain] 브리핑 LLM 실패 → 폴백:', e.message)
     return { ...base, ...fallbackBrief(data, today, deadlines), source: 'fallback', error: e.message }
@@ -146,7 +110,7 @@ function fallbackEnglish(today, history) {
 async function makeEnglish(data, llm, { today, todayAgenda, brief }) {
   const base = { date: today, createdAt: new Date().toISOString() }
   const history = data.englishHistory || []
-  if (!llm.key) return { ...base, ...fallbackEnglish(today, history), source: 'fallback' }
+  if (!ready(llm)) return { ...base, ...fallbackEnglish(today, history), source: 'fallback' }
   const avoid = history.slice(-30).map((h) => h.expression)
   const prompt = `너는 한국인 학습자를 위한 영어 회화 코치다. 학습자 수준: ${data.settings.englishLevel}.
 학습자의 North Star: ${data.profile.vision?.north_star || 'AI 서비스 기획자'}
@@ -166,9 +130,9 @@ async function makeEnglish(data, llm, { today, todayAgenda, brief }) {
   "tip": "뉘앙스/발음/실수 포인트 한 줄 (한국어)"
 }`
   try {
-    const out = await callGemini(llm, prompt, { temperature: 0.8 })
+    const out = await callJson(llm, prompt, { temperature: 0.8 })
     if (!out.expression || !Array.isArray(out.dialogue)) throw new Error('형식 오류')
-    return { ...base, ...out, source: 'gemini' }
+    return { ...base, ...out, source: providerOf(llm) }
   } catch (e) {
     console.warn('[brain] 영어 LLM 실패 → 폴백:', e.message)
     return { ...base, ...fallbackEnglish(today, history), source: 'fallback', error: e.message }
@@ -177,7 +141,7 @@ async function makeEnglish(data, llm, { today, todayAgenda, brief }) {
 
 // ── 뉴스 3줄 요약 ────────────────────────────────────────────────────────────
 async function summarizeNews(data, llm, items) {
-  if (!llm.key || !items.length) return null
+  if (!ready(llm) || !items.length) return null
   const prompt = `다음은 오늘 수집한 기술·뉴스 헤드라인이다. ${data.settings.userName}(North Star: ${data.profile.vision?.north_star || ''})에게 의미 있는 것 위주로 정리하라.
 ${JSON.stringify(items.slice(0, 40).map((i) => ({ t: i.title, s: i.source })))}
 
@@ -187,7 +151,7 @@ ${JSON.stringify(items.slice(0, 40).map((i) => ({ t: i.title, s: i.source })))}
   "pick": {"title": "가장 읽을 가치가 있는 헤드라인 원문 그대로", "why": "왜 너에게 중요한지 한 줄"}
 }`
   try {
-    const out = await callGemini(llm, prompt, { temperature: 0.3 })
+    const out = await callJson(llm, prompt, { temperature: 0.3 })
     return { ...out, createdAt: new Date().toISOString() }
   } catch (e) {
     console.warn('[brain] 뉴스 요약 실패:', e.message)
@@ -196,7 +160,7 @@ ${JSON.stringify(items.slice(0, 40).map((i) => ({ t: i.title, s: i.source })))}
 }
 
 async function testKey(llm) {
-  const out = await callGemini(llm, '{"ok": true} 를 그대로 JSON 으로 출력하라.', { timeoutMs: 20000 })
+  const out = await callJson(llm, '{"ok": true} 를 그대로 JSON 으로 출력하라.', { timeoutMs: 20000 })
   return !!out
 }
 
