@@ -168,9 +168,12 @@ function renderAskPreview() {
     <button class="btn sm" data-act="ask-cancel">취소</button>
     <button class="btn sm primary" data-act="ask-commit">${icon('corner-down-left', 14)}추가</button>
   </div>`
+    + (askItem.eval ? UI.evalCard(askItem.eval) : '')
 }
+let askPasted = null
 async function askSubmit() {
-  const text = $askInput.value.trim()
+  const shown = $askInput.value.trim()
+  const text = askPasted && shown.startsWith('📄') ? askPasted : shown
   if (!text) return
   if (askItem && askItem._text === text) return askCommit()
   askItem = { ...(await nf.previewInput(text)), _text: text }
@@ -181,9 +184,20 @@ async function askCommit() {
   const r = await nf.commitInput(askItem)
   toast(r?.message || '추가했어요')
   askItem = null
+  askPasted = null
   $askInput.value = ''
   renderAskPreview()
 }
+// 여러 줄 공문 붙여넣기 → 원문 전체를 해석·평가
+$askInput.addEventListener('paste', (e) => {
+  const t = e.clipboardData?.getData('text') || ''
+  if (!/\n/.test(t.trim())) return
+  e.preventDefault()
+  askPasted = t
+  $askInput.value = `📄 ${t.trim().split(/\r?\n/)[0].slice(0, 40)}… (공문)`
+  $askPreview.innerHTML = '<div class="muted small">공문을 읽고 평가하는 중…</div>'
+  askSubmit()
+})
 $ask.addEventListener('submit', (e) => {
   e.preventDefault()
   askSubmit()
@@ -628,6 +642,15 @@ function viewSettings() {
       ${field('영어 수준', '회화 표현 난이도', `<input class="input" data-set="englishLevel" value="${esc(s.englishLevel)}" />`)}
     </section>
 
+    <section class="card"><h2>${icon('sparkles', 16)}코치</h2>
+      ${field('코칭', '일정을 보고 무리·겹침·쉬는 시간 침범·마감을 위젯에서 먼저 알려줘요. 빠른 입력에서 <code>?</code>로 시작하면 질문.', sw('coach.enabled', s.coach?.enabled !== false))}
+      ${field('하루 일정 상한', '이보다 많으면 미루기를 제안 (분)', `<input class="input" type="number" min="60" max="960" step="30" data-set="coach.dailyLimitMin" value="${s.coach?.dailyLimitMin ?? 480}" style="max-width:120px" />`)}
+      ${field('일정 사이 여유', '이보다 짧으면 알려줘요 (분)', `<input class="input" type="number" min="0" max="120" step="5" data-set="coach.bufferMin" value="${s.coach?.bufferMin ?? 15}" style="max-width:120px" />`)}
+      ${field('쉬는 시간 시작', '이후 일정은 휴식 침범으로 봐요', `<input class="input" type="time" data-set="coach.quietAfter" value="${esc(s.coach?.quietAfter || '23:00')}" style="max-width:140px" />`)}
+      ${field('리듬 문서', '예: exam-study 의 <code>리듬.md</code> 전체 경로. 코치가 시험 모드·주간 루프까지 보고 판단해요.', `<input class="input" data-set="coach.rhythmFile" value="${esc(s.coach?.rhythmFile || '')}" placeholder="C:\\Users\\…\\exam-study\\리듬.md" />`)}
+      ${field('리듬 원칙', 'AI 코치가 답할 때 기준으로 삼아요', `<textarea class="input" data-set="coach.principles">${esc(s.coach?.principles || '')}</textarea>`)}
+    </section>
+
     <section class="card"><h2>${icon('calendar-days', 16)}iCal 주소 (선택 · 읽기 전용)</h2>
       ${field(
         '비공개 iCal 주소',
@@ -653,6 +676,7 @@ function viewSettings() {
       ${field('테마', '관리 창에도 함께 적용', seg('widget.theme', w.theme, [['dark', '다크'], ['light', '라이트'], ['auto', '시스템']]))}
       ${field('보여줄 카드', '', `<div class="stack" style="gap:10px">
           <label class="check-line">${sw('widget.showOneThing', w.showOneThing !== false)}오늘의 단 하나</label>
+          <label class="check-line">${sw('widget.showCoach', w.showCoach !== false)}코치</label>
           <label class="check-line">${sw('widget.showCalendar', w.showCalendar !== false)}달력 + 일정</label>
           <label class="check-line">${sw('widget.showEnglish', w.showEnglish)}영어 회화</label>
           <label class="check-line">${sw('widget.showNews', w.showNews)}뉴스</label></div>`)}

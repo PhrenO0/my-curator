@@ -595,3 +595,29 @@ body.privacy .card:hover .one-text,
 body.privacy .card:hover .ag .title {
   filter: none;
 }
+
+/* 코치 카드 */
+.coach .tip {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.coach .tip + .tip {
+  border-top: 1px solid var(--line, rgb(0 0 0 / 0.06));
+}
+.coach .tip svg {
+  flex: none;
+  margin-top: 2px;
+}
+.coach .tip.warn svg {
+  color: #f04452;
+}
+.coach .tip.info svg {
+  color: var(--accent);
+}
+.coach .tip.good svg {
+  color: #03b26c;
+}

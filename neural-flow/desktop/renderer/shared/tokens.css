@@ -165,3 +165,44 @@ button {
     transition: none !important;
   }
 }
+
+/* 새 일정 평가 카드 */
+.eval {
+  margin: 0 0 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.eval-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.eval .tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.eval .tag.good {
+  background: rgb(3 178 108 / 0.14);
+  color: #03b26c;
+}
+.eval .tag.mid {
+  background: rgb(255 159 10 / 0.16);
+  color: #d97a00;
+}
+.eval .tag.bad {
+  background: rgb(240 68 82 / 0.14);
+  color: #f04452;
+}
+.eval ul {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+.eval p {
+  margin: 4px 0 0;
+}

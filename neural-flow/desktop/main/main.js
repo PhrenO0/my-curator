@@ -32,6 +32,7 @@ const { pullNews } = require('./news.js')
 const { createScheduler } = require('./scheduler.js')
 const google = require('./google.js')
 const { interpret } = require('./input.js')
+const coach = require('./coach.js')
 const { detectClaude, providerOf } = require('./llm.js')
 const { pinToDesktop } = require('./win-desktop.js')
 
@@ -210,6 +211,7 @@ function snapshot() {
     englishHistory: (d.englishHistory || []).slice(-30),
     news: d.news,
     history: (d.history || []).slice(-60),
+    coachTips: coachTips(),
   }
 }
 
@@ -335,11 +337,57 @@ async function runCalendar() {
   })
 }
 
+// ── 코칭 ─────────────────────────────────────────────────────────────────────
+function coachContext() {
+  const d = store.get()
+  const today = A.ymd(new Date())
+  const occ = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities, doneMap: d.doneMap || {} }, today, A.addDays(today, 6))
+  const deadlines = A.deadlines({ events: d.events, activities: d.activities }, today)
+  return { occ, deadlines, today, coach: d.settings.coach }
+}
+
+function coachTips() {
+  const now = new Date()
+  try {
+    return coach.tips({ ...coachContext(), nowMin: now.getHours() * 60 + now.getMinutes() })
+  } catch (e) {
+    console.error('[coach]', e)
+    return []
+  }
+}
+
+async function askCoach(question) {
+  const q = String(question || '').replace(/^\s*[?？]/, '').trim()
+  if (!q) return null
+  return withBusy('coach', async () => {
+    const r = await coach.ask(q, { ...coachContext(), now: new Date(), brief: store.get().brief, llm: llm() })
+    store.update((x) => (x.inbox = [...(x.inbox || []), { at: new Date().toISOString(), kind: 'ask', title: q, result: r.answer.slice(0, 200) }].slice(-100)))
+    return r
+  })
+}
+
 // ── 언제든 입력: 미리보기 → 확인 → 실행 ──────────────────────────────────────
 async function previewInput(text) {
   const t = String(text || '').trim()
   if (!t) return null
-  return withBusy('input', () => interpret(t, { today: A.ymd(new Date()), llm: llm(), profile: store.get().profile }))
+  return withBusy('input', async () => {
+    const item = await interpret(t, { today: A.ymd(new Date()), llm: llm(), profile: store.get().profile })
+    if (item?.kind === 'event' && item.date) item.eval = await evaluateItem(item)
+    return item
+  })
+}
+
+// 새 일정 평가: 공문은 AI 까지(전략), 짧은 입력은 규칙(겹침·체력)만 — 미리보기가 느려지지 않게
+async function evaluateItem(item) {
+  try {
+    const d = store.get()
+    const occ = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities, doneMap: d.doneMap || {} }, A.addDays(item.date, -1), A.addDays(item.date, 3))
+    const ctx = { occ, deadlines: A.deadlines({ events: d.events, activities: d.activities }, A.ymd(new Date()), 60), coach: d.settings.coach, profile: d.profile }
+    return item.announcement ? await coach.evaluate(item, { ...ctx, llm: llm() }) : { ...coach.checkFit(item, ctx), source: 'rules' }
+  } catch (e) {
+    console.error('[evaluate]', e)
+    return null
+  }
 }
 
 function endOf(start, minutes) {
@@ -374,7 +422,8 @@ async function commitInput(item) {
     return { ok: true, message: '활동 보드에 추가했어요' }
   }
   // event: 로그인돼 있으면 구글 캘린더, 아니면 앱 안 일정
-  const ev = { title: item.title, date: item.date || today, start: item.start || null, minutes: item.minutes || 60, note: '' }
+  const note = [item.summary, item.link, item.eval?.strategy && `[코치] ${item.eval.verdict} · ${item.eval.strategy}`].filter(Boolean).join('\n')
+  const ev = { title: item.title, date: item.date || today, start: item.start || null, minutes: item.minutes || 60, note, location: item.location || '' }
   const gc = item.target !== 'local' && googleClient()
   if (gc) {
     try {
@@ -387,7 +436,7 @@ async function commitInput(item) {
     }
   }
   store.update((x) =>
-    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: endOf(ev.start, item.minutes), domain: item.domain || '', note: '', repeat: null, deadline: false, source: 'local' })
+    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: endOf(ev.start, item.minutes), domain: item.domain || '', note, repeat: null, deadline: false, source: 'local' })
   )
   log('앱 일정에 추가')
   return { ok: true, message: gc ? '구글 저장에 실패해 앱 일정에 넣었어요' : '일정에 추가했어요' }
@@ -530,7 +579,7 @@ function toggleQuick() {
     const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
     quick = new BrowserWindow({
       width: 640,
-      height: 360,
+      height: 460,
       x: Math.round(wa.x + (wa.width - 640) / 2),
       y: Math.round(wa.y + wa.height * 0.18),
       frame: false,
@@ -805,6 +854,7 @@ function registerIpc() {
 
   ipcMain.handle('nf:input:preview', (_e, text) => previewInput(text))
   ipcMain.handle('nf:input:commit', (_e, item) => commitInput(item))
+  ipcMain.handle('nf:coach:ask', (_e, q) => askCoach(q))
   ipcMain.handle('nf:quick:hide', () => quick?.hide())
   ipcMain.handle('nf:quick:open', () => toggleQuick())
   ipcMain.handle('nf:google:delete', async (_e, calendarId, eventId) => {
@@ -921,12 +971,13 @@ function registerIpc() {
   ipcMain.handle('nf:settings:save', (_e, patch = {}) => {
     const icsBefore = JSON.stringify(store.get().settings.icsUrls) // 값으로 복사 (객체는 아래에서 바뀜)
     store.update((d) => {
-      const { widget: w, schedule: sc, google: g, security: sec, updates: up, geminiKeyEnc, geminiKeyPlain, ...rest } = patch
+      const { widget: w, schedule: sc, google: g, security: sec, updates: up, coach: co, geminiKeyEnc, geminiKeyPlain, ...rest } = patch
       if (sec) {
         const { pinHash, hasPin, canEncrypt, ...safe } = sec // PIN 은 nf:security:set-pin 으로만
         Object.assign(d.settings.security, safe)
       }
       if (up) Object.assign(d.settings.updates, up)
+      if (co) Object.assign(d.settings.coach, co)
       Object.assign(d.settings, rest)
       if (w) Object.assign(d.settings.widget, w)
       if (sc) Object.assign(d.settings.schedule, sc)
