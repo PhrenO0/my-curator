@@ -46,3 +46,4 @@ neural-flow/desktop/dist/
 # python
 __pycache__/
 *.pyc
+neural-flow/desktop/build-config.json

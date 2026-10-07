@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('nf', {
   // 로그인
   authConfig: call('nf:auth:config'),
   signIn: call('nf:auth:signin'),
+  simpleMode: call('nf:auth:simple'),
   signOut: call('nf:auth:signout'),
   // 언제든 입력
   previewInput: call('nf:input:preview'),

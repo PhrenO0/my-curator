@@ -40,6 +40,22 @@ jobs:
 
       - run: npm ci
 
+      # GitHub 비밀값 NF_GOOGLE_CLIENT_ID / NF_GOOGLE_CLIENT_SECRET 이 있으면 설치 파일에 구워 넣는다
+      # → 기기마다 클라이언트 ID 를 붙여넣지 않고 'Google 로그인' 버튼만 누르면 된다
+      - name: Bake Google OAuth client
+        shell: bash
+        env:
+          CID: ${{ secrets.NF_GOOGLE_CLIENT_ID }}
+          CSECRET: ${{ secrets.NF_GOOGLE_CLIENT_SECRET }}
+        run: |
+          if [ -n "$CID" ]; then
+            node -e "require('fs').writeFileSync('build-config.json', JSON.stringify({googleClientId: process.env.CID, googleClientSecret: process.env.CSECRET || ''}))"
+            echo "baked google client"
+          else
+            echo '{}' > build-config.json
+            echo "no google client secret — 간편 모드/수동 입력"
+          fi
+
       - name: Build installer
         run: npx --yes electron-builder@26.15.3 ${{ matrix.target }} --publish never
         env:
