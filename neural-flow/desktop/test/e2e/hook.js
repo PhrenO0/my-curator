@@ -137,7 +137,7 @@ function startServer() {
   })
 }
 
-exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, toggleQuick, getQuick }) => {
+exports.run = async ({ app, store, getWidget, openManager, getManager, setWidgetMode, toggleQuick, getQuick }) => {
   const results = []
   const check = (name, ok, info = '') => results.push({ name, ok: !!ok, info })
   const server = await startServer()
@@ -182,7 +182,7 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, t
     s = await snap()
     check('본인 계정 로그인 → 잠금 해제', r.ok && !s.locked && s.account.email === OWNER, r.message || r.email)
     await wait(600)
-    const saved = JSON.parse(fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8'))
+    const saved = (store.flush(), store._read()) /* 암호화돼 있어도 앱과 같은 방식으로 복호화 */
     const { safeStorage } = require('electron')
     const encOk = safeStorage.isEncryptionAvailable()
     check(
@@ -405,7 +405,7 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, t
     check('간편 모드: 로그인 없이 열림 + iCal 일정', r.ok && !s.locked && !s.account && s.remote.events.some((e) => e.calendar === '공유'), `일정 ${r.count}개`)
 
     await wait(600)
-    const file = JSON.parse(fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8'))
+    const file = (store.flush(), store._read()) /* 암호화돼 있어도 앱과 같은 방식으로 복호화 */
     check('디스크 저장 + 로그아웃 시 토큰 삭제', file.events.some((e) => e.title === '테스트 마감') && file.account === null)
   } catch (e) {
     check('예외 없음', false, e.stack)
