@@ -65,11 +65,13 @@ function emptyDir() {
   return workDir
 }
 
-function callClaude({ claudeCmd, claudeModel }, prompt, { timeoutMs }) {
+function callClaude({ claudeCmd, claudeModel }, prompt, { timeoutMs, web }) {
   return new Promise((resolve, reject) => {
     // 모델 이름은 사용자 입력이라 셸에 넘기기 전에 모양을 검사한다
     const model = /^[\w.:-]+$/.test(claudeModel || '') ? ` --model ${claudeModel}` : ''
-    const command = `${claudeCmd || 'claude'} -p --output-format json --permission-mode dontAsk${model}`
+    // web: 마감·행사 정보처럼 모르는 사실은 직접 검색하게 (검색·읽기 도구만 허용)
+    const tools = web ? ' --allowedTools WebSearch WebFetch' : ''
+    const command = `${claudeCmd || 'claude'} -p --output-format json --permission-mode dontAsk${model}${tools}`
     const child = spawn(command, { cwd: emptyDir(), shell: true, windowsHide: true })
     let out = ''
     let err = ''
@@ -94,15 +96,17 @@ function callClaude({ claudeCmd, claudeModel }, prompt, { timeoutMs }) {
       }
     })
     child.stdin.end(
-      `${prompt}\n\n[출력 규칙] 도구를 쓰지 말고, 설명 없이 위에서 요구한 JSON 객체 하나만 출력하라.`
+      web
+        ? `${prompt}\n\n[조사 규칙] 마감일·행사 장소·신청 조건처럼 일정에 없는 사실은 추측하지 말고 WebSearch/WebFetch 로 직접 확인하라. 확인한 사실에는 출처 URL 을 붙이고, 못 찾으면 '확인 못 함'이라고 써라.\n[출력 규칙] 설명 없이 위에서 요구한 JSON 객체 하나만 출력하라.`
+        : `${prompt}\n\n[출력 규칙] 도구를 쓰지 말고, 설명 없이 위에서 요구한 JSON 객체 하나만 출력하라.`
     )
   })
 }
 
-async function callJson(llm, prompt, { temperature = 0.4, timeoutMs } = {}) {
+async function callJson(llm, prompt, { temperature = 0.4, timeoutMs, web = false } = {}) {
   const p = providerOf(llm)
   if (p === 'gemini') return callGemini(llm, prompt, { temperature, timeoutMs: timeoutMs || 45000 })
-  if (p === 'claude') return callClaude(llm, prompt, { timeoutMs: timeoutMs || 120000 })
+  if (p === 'claude') return callClaude(llm, prompt, { timeoutMs: timeoutMs || (web ? 240000 : 120000), web })
   throw new Error('LLM 엔진이 꺼져 있어요')
 }
 
