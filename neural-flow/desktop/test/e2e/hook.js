@@ -29,6 +29,7 @@ SUMMARY:주간 종일 이벤트
 END:VEVENT
 END:VCALENDAR`
 
+const UPDATE_BYTES = Buffer.from('fake installer')
 const RSS = `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
 ${[1, 2, 3].map((i) => `<item><title>테스트 뉴스 ${i}</title><link>https://example.com/${i}</link><pubDate>${new Date(Date.now() - i * 3600e3).toUTCString()}</pubDate></item>`).join('')}
 </channel></rss>`
@@ -78,6 +79,12 @@ function startServer() {
       req.on('end', () => {
         const p = url.pathname
         if (p === '/cal.ics') return res.writeHead(200, { 'Content-Type': 'text/calendar' }), res.end(ICS)
+        if (p.startsWith('/repos/')) {
+          const sha = require('crypto').createHash('sha256').update(UPDATE_BYTES).digest('hex')
+          const a = (name) => ({ name, browser_download_url: `http://127.0.0.1:${PORT}/dl`, size: UPDATE_BYTES.length, digest: `sha256:${sha}` })
+          return json(res, 200, [{ tag_name: 'desktop-v9.9.9', draft: false, prerelease: false, html_url: 'x', body: '테스트', assets: [a('neural-flow-9.9.9-win-x64.exe'), a('neural-flow-9.9.9-mac-arm64.dmg'), a('neural-flow-9.9.9-mac-x64.dmg')] }])
+        }
+        if (p === '/dl') return res.writeHead(200), res.end(UPDATE_BYTES)
         if (p === '/feed.xml') return res.writeHead(200, { 'Content-Type': 'application/rss+xml' }), res.end(RSS)
         // 구글 OAuth
         if (p === '/o/auth') {
@@ -340,6 +347,50 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, t
     await cap(getWidget(), 'widget-dark.png')
     await js("location.hash = 'today'")
     await cap(m, 'app-today-dark.png')
+
+    // ── 보안: PIN · 세션 잠금 · 가리기 · 암호화 ──
+    r = await js("nf.setPin('12')")
+    check('PIN 형식 검사', r.ok === false)
+    r = await js("nf.setPin('2580')")
+    s = await snap()
+    check('PIN 설정 (해시는 화면에 안 보냄)', r.ok && s.settings.security.hasPin && !JSON.stringify(s).includes('scrypt'))
+    await js('nf.lockNow()')
+    s = await snap()
+    const lockedWrite = await js("nf.saveEvent({ title: 'x', date: '2026-01-01' }).then(() => 'ok', (e) => e.message)")
+    check('지금 잠그기 → 개인 데이터 숨김 + 쓰기 거부', s.locked && s.sessionLocked && !s.needsLogin && s.events === undefined && /로그인이 필요/.test(lockedWrite))
+    check('PIN 잠금 화면', /PIN 을 입력하세요/.test(await js('document.body.innerText')))
+    await cap(m, 'pin-lock.png')
+    r = await js("nf.unlock('0000')")
+    check('틀린 PIN 거부', r.ok === false)
+    r = await js("nf.unlock('2580')")
+    s = await snap()
+    check('PIN 해제', r.ok && !s.locked)
+    await js('nf.togglePrivacy()')
+    await wait(400)
+    check('가리기 모드 (위젯)', (await snap()).privacy && (await getWidget().webContents.executeJavaScript("document.body.classList.contains('privacy')")))
+    await cap(getWidget(), 'widget-privacy.png')
+    await js('nf.togglePrivacy()')
+    await js("nf.setPin('')")
+    await wait(500)
+    const rawFile = fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8')
+    check(
+      safeStorage.isEncryptionAvailable() ? '데이터 파일 암호화 (평문 없음)' : '데이터 파일 (이 OS 는 키체인 없음 → 평문)',
+      safeStorage.isEncryptionAvailable() ? rawFile.startsWith('NFENC1') && !rawFile.includes('테스트 마감') : rawFile.includes('테스트 마감'),
+      rawFile.slice(0, 6)
+    )
+
+    // ── 업데이트: 확인 → 받기 → SHA-256 검증 (설치는 건너뜀) ──
+    const u = await js('nf.checkUpdate()')
+    if (process.platform === 'linux') {
+      // 리눅스용 설치 파일은 배포하지 않는다 → 새 버전은 보이지만 설치 대상은 없음
+      check('업데이트 확인 (리눅스: 설치 파일 없음)', u.version === '9.9.9' && !u.available && !u.asset)
+    } else {
+      check('업데이트 확인', u.available && u.version === '9.9.9' && !!u.asset, `${u.current} → ${u.version}`)
+      r = await js('nf.installUpdate()')
+      check('업데이트 받기 + SHA-256 검증', r.ok && r.dryRun && r.verified, JSON.stringify(r).slice(0, 80))
+    }
+    await js("location.hash = 'settings'")
+    await cap(m, 'app-settings-security.png')
 
     // ── 11) 로그아웃 → 다시 잠금 ──
     await js('nf.signOut()')

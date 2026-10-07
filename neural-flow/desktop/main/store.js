@@ -47,6 +47,15 @@ const DEFAULT_SETTINGS = {
     defaultCalendar: 'primary',
   },
   quickShortcut: 'CommandOrControl+Shift+Space',
+  security: {
+    encryptData: true, // 저장 파일을 OS 키체인으로 암호화
+    pinHash: '', // 'scrypt:salt:hash' — 있으면 자리 비움·화면 잠금 뒤 PIN 으로 다시 연다
+    idleLockMinutes: 15, // 0 = 끔
+    lockOnScreenLock: true,
+    contentProtection: true, // 화면 공유·캡처에 앱 창이 찍히지 않게
+    privacyMode: false, // 위젯 내용 가리기
+  },
+  updates: { autoCheck: true, skipVersion: '' },
   widget: {
     visible: true,
     x: null,
@@ -172,19 +181,51 @@ function mergeSettings(saved) {
     widget: { ...base.widget, ...(saved.widget || {}) },
     schedule: { ...base.schedule, ...(saved.schedule || {}) },
     google: { ...base.google, ...(saved.google || {}) },
+    security: { ...base.security, ...(saved.security || {}) },
+    updates: { ...base.updates, ...(saved.updates || {}) },
   }
 }
 
+// 디스크 암호화: cipher = { encrypt(str) → Buffer, decrypt(Buffer) → str } (main 에서 OS 키체인 safeStorage 로 넘긴다)
+const MAGIC = 'NFENC1\n'
+
 class Store {
-  constructor(dir) {
+  constructor(dir, { cipher = null } = {}) {
+    this.cipher = cipher
     this.file = path.join(dir, 'neural-flow.json')
     this.data = null
     this.listeners = new Set()
     this._timer = null
   }
 
+  _read() {
+    let raw
+    try {
+      raw = fs.readFileSync(this.file, 'utf-8')
+    } catch {
+      return null
+    }
+    if (raw.startsWith(MAGIC)) {
+      if (!this.cipher) throw new Error('암호화된 데이터인데 복호화 수단이 없어요')
+      return JSON.parse(this.cipher.decrypt(Buffer.from(raw.slice(MAGIC.length), 'base64')))
+    }
+    try {
+      return JSON.parse(raw) // 옛 평문 파일 → 다음 저장 때 암호화된다
+    } catch {
+      return null
+    }
+  }
+
+  get encrypted() {
+    try {
+      return fs.readFileSync(this.file, 'utf-8').startsWith(MAGIC)
+    } catch {
+      return false
+    }
+  }
+
   load() {
-    const saved = readJson(this.file)
+    const saved = this._read()
     if (saved) {
       this.data = { ...emptyData(), ...saved, settings: mergeSettings(saved.settings) }
     } else {
@@ -234,9 +275,11 @@ class Store {
     clearTimeout(this._timer)
     fs.mkdirSync(path.dirname(this.file), { recursive: true })
     const tmp = this.file + '.tmp'
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), 'utf-8')
+    const json = JSON.stringify(this.data, null, 2)
+    const body = this.cipher && this.data.settings?.security?.encryptData !== false ? MAGIC + this.cipher.encrypt(json).toString('base64') : json
+    fs.writeFileSync(tmp, body, { encoding: 'utf-8', mode: 0o600 }) // 내 계정만 읽기·쓰기
     fs.renameSync(tmp, this.file)
   }
 }
 
-module.exports = { Store, uid, DEFAULT_SETTINGS }
+module.exports = { Store, uid, DEFAULT_SETTINGS, MAGIC }

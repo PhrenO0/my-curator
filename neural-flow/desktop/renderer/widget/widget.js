@@ -11,6 +11,7 @@ let tab = localStorage.getItem('nf.widget.tab') || 'english'
 async function refresh() {
   S = await nf.snapshot()
   document.body.classList.toggle('edit', S.widgetMode === 'edit')
+  document.body.classList.toggle('privacy', !!S.privacy)
   if (S.locked) return renderLocked()
   if (!selected || !view) {
     selected = S.today
@@ -209,8 +210,8 @@ function renderLocked() {
     </div></div>
   </section>
   <section class="card locked">
-    ${icon('lock', 18)}<div><b>잠겨 있어요</b><span>본인 구글 계정으로 로그인하면 일정이 보여요</span></div>
-    <button class="pill-btn" data-act="open" data-view="today">로그인</button>
+    ${icon('lock', 18)}<div><b>잠겨 있어요</b><span>${S.sessionLocked && !S.needsLogin ? 'PIN 으로 열면 일정이 보여요' : '본인 구글 계정으로 로그인하면 일정이 보여요'}</span></div>
+    <button class="pill-btn" data-act="open" data-view="today">${S.sessionLocked && !S.needsLogin ? '열기' : '로그인'}</button>
   </section>`
 }
 

@@ -33,6 +33,17 @@ contextBridge.exposeInMainWorld('nf', {
   openQuick: call('nf:quick:open'),
   deleteGoogleEvent: call('nf:google:delete'),
   detectEngine: call('nf:engine:detect'),
+  // 보안 · 개인정보
+  unlock: call('nf:security:unlock'),
+  setPin: call('nf:security:set-pin'),
+  lockNow: call('nf:security:lock'),
+  togglePrivacy: call('nf:security:privacy'),
+  exportData: call('nf:data:export'),
+  wipeData: call('nf:data:wipe'),
+  // 업데이트
+  checkUpdate: call('nf:update:check'),
+  installUpdate: call('nf:update:install'),
+  skipUpdate: call('nf:update:skip'),
   onChange: (fn) => {
     const h = () => fn()
     ipcRenderer.on('nf:changed', h)
