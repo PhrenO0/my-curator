@@ -66,6 +66,24 @@ function dec(v) {
   }
 }
 
+// 설치 파일에 같이 구운 구글 OAuth 클라이언트 (release 워크플로가 GitHub 비밀값으로 만든다).
+// 있으면 기기마다 클라이언트 ID 를 붙여넣지 않고 'Google 로그인' 버튼만 누르면 된다.
+function applyBuildConfig() {
+  if (TEST_HOOK && !process.env.NF_BUILD_CONFIG) return
+  let cfg = null
+  try {
+    cfg = JSON.parse(fs.readFileSync(process.env.NF_BUILD_CONFIG || path.join(ROOT, 'build-config.json'), 'utf-8'))
+  } catch {
+    return
+  }
+  const g = store.get().settings.google
+  if (!g.clientId && cfg.googleClientId)
+    store.update((d) => {
+      d.settings.google.clientId = cfg.googleClientId
+      if (cfg.googleClientSecret) d.settings.google.clientSecretEnc = enc(cfg.googleClientSecret)
+    })
+}
+
 // ── 로그인 (허용된 구글 계정만) ──────────────────────────────────────────────
 const locked = () => store.get().settings.requireLogin !== false && !store.get().account?.email
 let gclient = null
@@ -560,7 +578,7 @@ function buildTray() {
 // ── IPC ──────────────────────────────────────────────────────────────────────
 function registerIpc() {
   // 잠겨 있을 때도 쓸 수 있는 채널만 열어 두고, 나머지는 로그인 전 거부
-  const OPEN = new Set(['nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open'])
+  const OPEN = new Set(['nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:auth:simple', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open'])
   const handle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = (ch, fn) =>
     handle(ch, (...args) => {
@@ -581,6 +599,18 @@ function registerIpc() {
       }
     })
     gclient = null
+  })
+  // 간편 모드: 로그인 없이 iCal 주소로 구글 캘린더를 읽기만 한다
+  ipcMain.handle('nf:auth:simple', async (_e, icsUrl) => {
+    const url = String(icsUrl || '').trim()
+    if (!/^(https?|webcal):\/\//i.test(url)) return { ok: false, message: 'iCal 주소(https://…ics)를 붙여넣어 주세요' }
+    store.update((d) => {
+      d.settings.requireLogin = false
+      d.settings.icsUrls = [...new Set([...(d.settings.icsUrls || []), url])]
+    })
+    await runCalendar()
+    const n = (store.get().remote.events || []).length
+    return { ok: true, count: n }
   })
   ipcMain.handle('nf:auth:signin', async () => {
     const g = store.get().settings.google
@@ -674,6 +704,19 @@ function registerIpc() {
   ipcMain.handle('nf:activity:delete', (_e, id) =>
     store.update((d) => (d.activities = d.activities.filter((x) => x.id !== id)))
   )
+  // 날짜가 지난 미완료 활동 → 보류 (지우지 않는다)
+  ipcMain.handle('nf:activity:archive-stale', () => {
+    const today = A.ymd(new Date())
+    let n = 0
+    store.update((d) => {
+      for (const a of d.activities)
+        if (a.date && a.date < today && a.status !== '완료' && a.status !== '보류') {
+          a.status = '보류'
+          n++
+        }
+    })
+    return n
+  })
   ipcMain.handle('nf:activity:status', (_e, id, status) =>
     store.update((d) => {
       const a = d.activities.find((x) => x.id === id)
@@ -781,6 +824,7 @@ app.on('web-contents-created', (_e, wc) => {
 app.whenReady().then(async () => {
   if (IS_MAC) app.dock?.hide()
   store = new Store(process.env.NF_DATA_DIR || app.getPath('userData')).load()
+  applyBuildConfig()
   const theme = store.get().settings.widget.theme
   nativeTheme.themeSource = theme === 'auto' ? 'system' : theme
 

@@ -1336,3 +1336,30 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+.lock-card .or {
+  margin: 18px 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.lock-card .hint {
+  margin: -4px 0 14px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  text-align: left;
+}
+.adv {
+  margin-top: 18px;
+  text-align: left;
+}
+.adv summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-align: center;
+  padding: 6px;
+}
+.adv[open] summary {
+  margin-bottom: 12px;
+}

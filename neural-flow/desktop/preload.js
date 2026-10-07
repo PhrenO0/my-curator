@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('nf', {
   saveActivity: call('nf:activity:save'),
   deleteActivity: call('nf:activity:delete'),
   setActivityStatus: call('nf:activity:status'),
+  archiveStale: call('nf:activity:archive-stale'),
   toggleOccurrence: call('nf:occurrence:toggle'),
   toggleOneThing: call('nf:onething:toggle'),
   setOneThing: call('nf:onething:set'),
@@ -23,6 +24,7 @@ contextBridge.exposeInMainWorld('nf', {
   // 로그인
   authConfig: call('nf:auth:config'),
   signIn: call('nf:auth:signin'),
+  simpleMode: call('nf:auth:simple'),
   signOut: call('nf:auth:signout'),
   // 언제든 입력
   previewInput: call('nf:input:preview'),

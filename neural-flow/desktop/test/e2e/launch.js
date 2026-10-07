@@ -10,6 +10,9 @@ const electron = require('electron') // Node 에서 require 하면 실행 파일
 const root = path.join(__dirname, '..', '..')
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-e2e-'))
 const port = String(47000 + Math.floor(Math.random() * 900))
+// 설치 파일에 구워지는 build-config.json 흉내
+const buildConfig = path.join(dataDir, 'build-config.json')
+fs.writeFileSync(buildConfig, JSON.stringify({ googleClientId: 'cid', googleClientSecret: 'sec' }))
 if (process.env.NF_SHOT_DIR) fs.mkdirSync(process.env.NF_SHOT_DIR, { recursive: true })
 
 // NF_E2E_APP=설치본 실행 파일 경로 를 주면 소스 대신 패키징된 앱을 검사한다
@@ -24,6 +27,7 @@ const child = spawn(bin, args, {
     ...process.env,
     NF_TEST_HOOK: path.join(__dirname, 'hook.js'),
     NF_DATA_DIR: dataDir,
+    NF_BUILD_CONFIG: buildConfig,
     NF_E2E_PORT: port,
     NF_GEMINI_BASE: `http://127.0.0.1:${port}`,
     // 가짜 구글 (로그인·캘린더)

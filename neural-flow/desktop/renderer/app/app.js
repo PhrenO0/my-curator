@@ -90,22 +90,35 @@ function renderLock() {
   $lock.innerHTML = `<div class="lock"><div class="lock-card">
     <div class="brand-mark">${icon('waves', 30)}</div>
     <h1>neural-flow</h1>
-    <p>${owner ? `<b>${esc(owner)}</b> 계정으로만 열 수 있어요` : '처음 로그인한 구글 계정이 주인으로 등록돼요'}</p>
+    <p>${needSetup ? '구글 캘린더 주소 하나면 바로 시작해요' : owner ? `<b>${esc(owner)}</b> 계정으로만 열 수 있어요` : '처음 로그인한 구글 계정이 주인으로 등록돼요'}</p>
+    ${
+      !needSetup
+        ? `<button class="btn primary lg block gbtn" data-act="signin" ${S.busy.signin ? 'disabled' : ''}>${S.busy.signin ? '브라우저에서 로그인을 마쳐 주세요…' : 'Google 계정으로 로그인'}</button>
+           <div class="or">또는</div>`
+        : ''
+    }
+    <form id="simple-form">
+      <div class="f"><label>간편 모드 — 구글 캘린더 iCal 비밀 주소</label>
+        <input class="input" name="ics" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" required /></div>
+      <p class="hint">구글 캘린더 웹 → 설정 → 내 캘린더 → <b>캘린더 통합</b> → 'iCal 형식의 비공개 주소' 복사.
+        로그인 없이 일정을 <b>읽기만</b> 해요. 빠른 입력은 앱 안에 저장돼요.</p>
+      <button class="btn ${needSetup ? 'primary' : ''} lg block" ${S.busy.calendar ? 'disabled' : ''}>${S.busy.calendar ? '캘린더 불러오는 중…' : '간편 모드로 시작'}</button>
+    </form>
     ${
       needSetup
-        ? `<ol class="steps">
-            <li>Google Cloud 콘솔 → API 및 서비스 → <b>Google Calendar API</b> 사용 설정</li>
-            <li>OAuth 동의 화면: 외부 · 테스트 사용자에 본인 이메일 추가</li>
-            <li>사용자 인증 정보 → OAuth 클라이언트 ID → 유형 <b>데스크톱 앱</b></li>
-            <li>만든 클라이언트 ID·보안 비밀을 아래에 붙여넣기</li>
+        ? `<details class="adv"><summary>구글 로그인 연결 (일정 쓰기까지, 한 번만 설정)</summary>
+          <ol class="steps">
+            <li>Google Cloud 콘솔 → <b>Google Calendar API</b> 사용 설정</li>
+            <li>OAuth 동의 화면: 외부 · 테스트 사용자에 본인 이메일</li>
+            <li>OAuth 클라이언트 ID → 유형 <b>데스크톱 앱</b></li>
+            <li>아래에 붙여넣기 — GitHub 비밀값에 넣어 두면 다음 설치부터는 이 단계가 사라져요</li>
           </ol>
           <form id="auth-form">
             <div class="f"><label>클라이언트 ID</label><input class="input" name="clientId" value="${esc(g.clientId || '')}" placeholder="xxxx.apps.googleusercontent.com" required /></div>
             <div class="f"><label>클라이언트 보안 비밀</label><input class="input" name="clientSecret" type="password" placeholder="${g.hasSecret ? '저장됨 — 바꿀 때만 입력' : 'GOCSPX-…'}" /></div>
-            <button class="btn primary lg block">저장하고 계속</button>
-          </form>`
-        : `<button class="btn primary lg block gbtn" data-act="signin" ${S.busy.signin ? 'disabled' : ''}>${S.busy.signin ? '브라우저에서 로그인을 마쳐 주세요…' : 'Google 계정으로 로그인'}</button>
-           <button class="btn ghost sm" style="margin-top:12px" data-act="lock-setup">로그인 설정 바꾸기</button>`
+            <button class="btn lg block">저장하고 계속</button>
+          </form></details>`
+        : `<button class="btn ghost sm" style="margin-top:12px" data-act="lock-setup">로그인 설정 바꾸기</button>`
     }
     ${lockError ? `<div class="err">${esc(lockError)}</div>` : ''}
   </div></div>`
@@ -375,6 +388,10 @@ function viewBoard() {
   return `
   <div class="page-h">
     <div class="titles"><div class="eyebrow">제안 → 승인 → 예정(캘린더) → 진행 → 완료</div><h1>활동 보드</h1></div>
+    ${(() => {
+      const n = S.activities.filter((a) => a.date && a.date < S.today && !['완료', '보류'].includes(a.status)).length
+      return n ? `<button class="btn sm" data-act="archive-stale" title="날짜가 지난 미완료 활동을 보류로">${icon('hourglass', 13)}지난 활동 ${n}개 정리</button>` : ''
+    })()}
     <button class="btn sm" data-act="run" data-job="weekly" ${S.busy.brief ? 'disabled' : ''}>${icon('sparkles', 13, S.busy.brief ? 'spin' : '')}주간 추천 받기</button>
     <button class="btn sm primary" data-act="new-activity">${icon('plus', 14)}활동 추가</button>
   </div>
@@ -805,6 +822,10 @@ document.addEventListener('click', async (e) => {
       return activityModal({})
     case 'edit-activity':
       return activityModal(S.activities.find((a) => a.id === d.id))
+    case 'archive-stale': {
+      const n = await nf.archiveStale()
+      return toast(`${n}개를 보류로 옮겼어요 (보류 칸에서 되살릴 수 있어요)`)
+    }
     case 'filter':
       boardFilter = d.d
       return render()
@@ -844,6 +865,19 @@ document.addEventListener('click', async (e) => {
     case 'del-feed':
       return nf.saveSettings({ feeds: S.settings.feeds.filter((_, i) => i !== Number(d.i)) })
   }
+})
+
+// 잠금 화면: 간편 모드
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'simple-form') return
+  e.preventDefault()
+  const ics = new FormData(e.target).get('ics')
+  document.activeElement?.blur()
+  lockError = ''
+  const r = await nf.simpleMode(ics)
+  if (!r.ok) lockError = r.message
+  else toast(`간편 모드로 시작했어요 · 일정 ${r.count}개`)
+  refresh()
 })
 
 // 잠금 화면: 로그인 설정 저장

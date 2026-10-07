@@ -154,7 +154,8 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, t
     check('처음엔 잠겨 있음 (개인 데이터 미전송)', s.locked === true && s.events === undefined && s.settings.google.allowedEmails.includes(OWNER))
     const blocked = await js("nf.saveEvent({ title: 'x', date: '2026-01-01' }).then(() => 'ok', (e) => e.message)")
     check('잠금 중 쓰기 거부', /로그인이 필요/.test(blocked), blocked)
-    check('잠금 화면 렌더링', (await js('document.body.innerText')).includes('계정으로만 열 수 있어요'))
+    check('잠금 화면 렌더링 (구글 로그인 + 간편 모드)', /Google 계정으로 로그인/.test(await js('document.body.innerText')) && /간편 모드로 시작/.test(await js('document.body.innerText')))
+    check('설치 파일에 구운 구글 클라이언트 자동 적용', s.settings.google.clientId === 'cid' && s.settings.google.hasSecret)
     await cap(m, 'lock-setup.png')
 
     // ── 2) 로그인 ──
@@ -280,6 +281,11 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, t
     s = await snap()
     check('반복 일정은 날짜별로 완료', !!s.doneMap[routine.key])
 
+    const stale = s.activities.filter((a) => a.date && a.date < today && !['완료', '보류'].includes(a.status)).length
+    const moved = await js('nf.archiveStale()')
+    s = await snap()
+    check('지난 활동 정리 → 보류 (삭제 안 함)', moved === stale && moved > 0 && !s.activities.some((a) => a.date && a.date < today && !['완료', '보류'].includes(a.status)), `${moved}개`)
+
     // ── 9) 화면 ──
     await js("location.hash = 'calendar'")
     await wait(400)
@@ -339,6 +345,13 @@ exports.run = async ({ app, getWidget, openManager, getManager, setWidgetMode, t
     await js('nf.signOut()')
     s = await snap()
     check('로그아웃 → 다시 잠금', s.locked && s.events === undefined)
+
+    // ── 12) 간편 모드: 로그인 없이 iCal 로 시작 ──
+    r = await js("nf.simpleMode('notaurl')")
+    check('간편 모드: 잘못된 주소 거부', r.ok === false)
+    r = await js(`nf.simpleMode('${base}/cal.ics')`)
+    s = await snap()
+    check('간편 모드: 로그인 없이 열림 + iCal 일정', r.ok && !s.locked && !s.account && s.remote.events.some((e) => e.calendar === '공유'), `일정 ${r.count}개`)
 
     await wait(600)
     const file = JSON.parse(fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8'))
