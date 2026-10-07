@@ -178,6 +178,7 @@ class GoogleClient {
           })
           for (const ev of res.items || []) {
             if (ev.status === 'cancelled') continue
+            if (ev.attendees?.some((a) => a.self && a.responseStatus === 'declined')) continue // 불참 응답한 일정은 빼기
             const allDay = !!ev.start?.date
             const start = allDay ? A.parseYmd(ev.start.date) : new Date(ev.start?.dateTime)
             const end = allDay ? null : new Date(ev.end?.dateTime)
@@ -190,6 +191,8 @@ class GoogleClient {
               start: allDay ? null : A.hm(start),
               end: end ? A.hm(end) : null,
               location: ev.location || '',
+              note: String(ev.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300),
+              free: ev.transparency === 'transparent', // '한가함' 표시 = 유동 블록
               calendar: cal.name,
               color: cal.color,
               link: ev.htmlLink || '',

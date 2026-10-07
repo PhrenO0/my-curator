@@ -647,6 +647,7 @@ function viewSettings() {
       ${field('하루 일정 상한', '이보다 많으면 미루기를 제안 (분)', `<input class="input" type="number" min="60" max="960" step="30" data-set="coach.dailyLimitMin" value="${s.coach?.dailyLimitMin ?? 480}" style="max-width:120px" />`)}
       ${field('일정 사이 여유', '이보다 짧으면 알려줘요 (분)', `<input class="input" type="number" min="0" max="120" step="5" data-set="coach.bufferMin" value="${s.coach?.bufferMin ?? 15}" style="max-width:120px" />`)}
       ${field('쉬는 시간 시작', '이후 일정은 휴식 침범으로 봐요', `<input class="input" type="time" data-set="coach.quietAfter" value="${esc(s.coach?.quietAfter || '23:00')}" style="max-width:140px" />`)}
+      ${field('리듬 문서', '예: exam-study 의 <code>리듬.md</code> 전체 경로. 코치가 시험 모드·주간 루프까지 보고 판단해요.', `<input class="input" data-set="coach.rhythmFile" value="${esc(s.coach?.rhythmFile || '')}" placeholder="C:\\Users\\…\\exam-study\\리듬.md" />`)}
       ${field('리듬 원칙', 'AI 코치가 답할 때 기준으로 삼아요', `<textarea class="input" data-set="coach.principles">${esc(s.coach?.principles || '')}</textarea>`)}
     </section>
 

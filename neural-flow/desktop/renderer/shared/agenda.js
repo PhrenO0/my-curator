@@ -111,6 +111,8 @@
         domain: r.calendar || '',
         color: r.color || REMOTE_COLOR,
         location: r.location || '',
+        note: r.note || '',
+        free: !!r.free,
         link: r.link || '',
         source: r.source || 'ics',
         calendarId: r.calendarId || null,

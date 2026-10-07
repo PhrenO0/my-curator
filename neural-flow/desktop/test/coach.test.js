@@ -66,3 +66,17 @@ test('새 일정 평가: 겹침 → 비추천, 여유 → 추천 (규칙)', asyn
   assert.equal(ok.verdict, '추천')
   assert.equal(ok.energy, '여유')
 })
+
+test('유동 블록(한가함)은 겹침이 아니라 참고로 · 리듬 문서 읽기', () => {
+  const occ = [{ ...ev('2026-10-13', '10:30', '13:15', '딥워크'), free: true }]
+  const fit = coach.checkFit({ title: 'x', date: '2026-10-13', start: '11:00', minutes: 60 }, { occ })
+  assert.deepEqual(fit.conflicts, [])
+  assert.deepEqual(fit.soft, ['10:30 딥워크'])
+  const fs = require('fs')
+  const os = require('os')
+  const path = require('path')
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nf-r-')), '리듬.md')
+  fs.writeFileSync(f, '시험 모드 10/12–10/22')
+  assert.equal(coach.rhythmDoc({ rhythmFile: f }), '시험 모드 10/12–10/22')
+  assert.equal(coach.rhythmDoc({ rhythmFile: f + '.없음' }), '')
+})

@@ -11,7 +11,19 @@ const DEFAULT_COACH = {
   bufferMin: 15, // 일정 사이 최소 여유
   quietAfter: '23:00', // 이후는 쉬는 시간
   protect: [{ label: '교회', weekday: 0, start: '13:30', end: '16:00' }], // 지켜야 하는 시간
+  rhythmFile: '', // 리듬 문서 경로 (.md)
   principles: '지속 가능한 주간 사이클. 하루 단 하나에 집중. 여유 시간은 일정처럼 지킨다. 무리하면 줄이는 쪽을 제안.',
+}
+
+// 리듬 문서(예: exam-study/리듬.md)를 코치의 기준으로 읽는다
+const fs = require('fs')
+function rhythmDoc(c) {
+  if (!c.rhythmFile) return ''
+  try {
+    return fs.readFileSync(c.rhythmFile, 'utf8').slice(0, 6000)
+  } catch {
+    return ''
+  }
 }
 
 const toMin = (t) => {
@@ -28,7 +40,7 @@ function spans(items) {
       if (s == null) return null
       let e = toMin(o.end)
       if (e == null || e <= s) e = s + 60
-      return { title: o.title, s, e }
+      return { title: o.title, s, e, free: !!o.free }
     })
     .filter(Boolean)
     .sort((a, b) => a.s - b.s)
@@ -53,7 +65,7 @@ function tips({ occ = [], deadlines = [], today, nowMin = null, coach = {} }) {
       if (A.weekday(date) !== p.weekday) continue
       const ps = toMin(p.start)
       const pe = toMin(p.end)
-      const hit = sp.find((x) => x.s < pe && x.e > ps)
+      const hit = sp.find((x) => !x.free && x.s < pe && x.e > ps)
       if (hit) add('warn', date, `${label} '${hit.title}'이(가) ${p.label} 시간(${p.start}~${p.end})과 겹쳐요.`)
     }
     const quiet = toMin(c.quietAfter)
@@ -87,7 +99,7 @@ function agendaText(occ, today) {
     const date = A.addDays(today, i)
     const items = occ.filter((o) => o.date === date)
     if (!items.length) continue
-    lines.push(`${date}(${'일월화수목금토'[A.weekday(date)]}): ` + items.map((o) => `${o.start ? `${o.start}${o.end ? `~${o.end}` : ''} ` : ''}${o.title}${o.done ? '(완료)' : ''}`).join(', '))
+    lines.push(`${date}(${'일월화수목금토'[A.weekday(date)]}): ` + items.map((o) => `${o.start ? `${o.start}${o.end ? `~${o.end}` : ''} ` : '종일 '}${o.title}${o.free ? '(유동 블록)' : ''}${o.done ? '(완료)' : ''}${o.location ? ` @${o.location.slice(0, 30)}` : ''}${o.note ? ` — ${o.note.slice(0, 120)}` : ''}`).join('\n  '))
   }
   return lines.join('\n') || '(일정 없음)'
 }
@@ -100,7 +112,7 @@ async function ask(question, { occ = [], deadlines = [], today, now, brief, coac
     const prompt = `너는 사용자의 일정 코치다. 아래 정보로 질문에 한국어로 짧고 구체적으로 답하라. 막연한 조언 대신 바로 할 행동(시간대 포함)을 제시하고, 무리한 계획이면 줄이는 쪽을 먼저 제안하라. 모르는 건 지어내지 마라.
 [지금] ${today} ${now ? hm(nowMin) : ''}
 [리듬 원칙] ${c.principles}
-[지켜야 하는 시간] ${(c.protect || []).map((p) => `${'일월화수목금토'[p.weekday]} ${p.start}~${p.end} ${p.label}`).join(', ') || '없음'} / ${c.quietAfter} 이후 휴식
+${rhythmDoc(c) ? `[리듬 문서]\n${rhythmDoc(c)}\n` : ''}[지켜야 하는 시간] ${(c.protect || []).map((p) => `${'일월화수목금토'[p.weekday]} ${p.start}~${p.end} ${p.label}`).join(', ') || '없음'} / ${c.quietAfter} 이후 휴식
 [오늘의 단 하나] ${brief && brief.date === today ? brief.one_thing : '없음'}
 [마감] ${deadlines.map((d) => `D-${d.d} ${d.title}`).join(', ') || '없음'}
 [7일 일정]
@@ -126,7 +138,9 @@ function checkFit(item, { occ = [], deadlines = [], coach = {} }) {
   const len = Number(item.minutes) || 90
   const span = s == null ? null : { s, e: s + len }
   const day = spans(occ.filter((o) => o.date === item.date && !o.done))
-  const conflicts = span ? day.filter((x) => x.s < span.e && x.e > span.s).map((x) => `${hm(x.s)} ${x.title}`) : []
+  const overlap = span ? day.filter((x) => x.s < span.e && x.e > span.s) : []
+  const conflicts = overlap.filter((x) => !x.free).map((x) => `${hm(x.s)} ${x.title}`)
+  const soft = overlap.filter((x) => x.free).map((x) => `${hm(x.s)} ${x.title}`)
   const protects = (c.protect || []).filter((p) => span && A.weekday(item.date) === p.weekday && toMin(p.start) < span.e && toMin(p.end) > span.s).map((p) => p.label)
   const dayMin = day.reduce((n, x) => n + (x.e - x.s), 0) + (span ? len : 0)
   const late = span && toMin(c.quietAfter) != null && span.e > toMin(c.quietAfter)
@@ -138,12 +152,13 @@ function checkFit(item, { occ = [], deadlines = [], coach = {} }) {
   if (late && energy === '여유') energy = '보통'
   const notes = []
   if (conflicts.length) notes.push(`겹침: ${conflicts.join(', ')}`)
+  if (soft.length) notes.push(`옮길 수 있는 블록과 겹침: ${soft.join(', ')}`)
   if (protects.length) notes.push(`${protects.join(', ')} 시간과 겹침`)
   if (late) notes.push(`${c.quietAfter} 이후 쉬는 시간 침범`)
   if (nextEarly) notes.push(`다음 날 ${hm(nextEarly.s)} ${nextEarly.title}`)
   if (near.length) notes.push(`가까운 마감: ${near.map((d) => d.title).join(', ')}`)
   notes.push(`그날 일정 총 ${Math.round(dayMin / 6) / 10}시간 (전날 ${Math.round(prevDay.reduce((n, x) => n + x.e - x.s, 0) / 6) / 10}시간)`)
-  return { conflicts, protects, late: !!late, energy, dayMin, notes }
+  return { conflicts, soft, protects, late: !!late, energy, dayMin, notes }
 }
 
 async function evaluate(item, { occ = [], deadlines = [], coach = {}, profile = {}, llm }) {
@@ -164,9 +179,9 @@ async function evaluate(item, { occ = [], deadlines = [], coach = {}, profile = 
 [비전·목표] ${JSON.stringify({ vision: profile.vision || {}, goals: profile.goals || {} }).slice(0, 1500)}
 [영역] ${(profile.domains || []).map((d) => d.name).join(', ')}
 [리듬 원칙] ${c.principles}
-[자동 점검] ${fit.notes.join(' / ')} / 체력 ${fit.energy}
+${rhythmDoc(c) ? `[리듬 문서]\n${rhythmDoc(c)}\n` : ''}[자동 점검] ${fit.notes.join(' / ')} / 체력 ${fit.energy}
 [주변 일정]
-${agendaText(occ, A.addDays(item.date, -1)).split('\n').slice(0, 3).join('\n')}
+${agendaText(occ, A.addDays(item.date, -1))}
 JSON: {"verdict":"추천|선택|비추천","energy":"여유|보통|빡빡","strategy":"인생·커리어 전략상 의미 2문장 (목표와 연결되는지)","advice":"참석 여부와 준비/조정 방법 2문장"}`
   try {
     const r = await callJson(llm, prompt, { temperature: 0.4 })
@@ -188,4 +203,4 @@ function fallbackAnswer(t) {
   return 'AI 엔진이 꺼져 있어 일정 점검 결과만 알려 드려요. ' + t.map((x) => x.text).join(' ')
 }
 
-module.exports = { tips, ask, checkFit, evaluate, DEFAULT_COACH, spans }
+module.exports = { tips, ask, checkFit, evaluate, rhythmDoc, DEFAULT_COACH, spans }

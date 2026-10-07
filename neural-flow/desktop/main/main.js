@@ -381,7 +381,7 @@ async function previewInput(text) {
 async function evaluateItem(item) {
   try {
     const d = store.get()
-    const occ = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities, doneMap: d.doneMap || {} }, A.addDays(item.date, -1), A.addDays(item.date, 1))
+    const occ = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities, doneMap: d.doneMap || {} }, A.addDays(item.date, -1), A.addDays(item.date, 3))
     const ctx = { occ, deadlines: A.deadlines({ events: d.events, activities: d.activities }, A.ymd(new Date()), 60), coach: d.settings.coach, profile: d.profile }
     return item.announcement ? await coach.evaluate(item, { ...ctx, llm: llm() }) : { ...coach.checkFit(item, ctx), source: 'rules' }
   } catch (e) {
