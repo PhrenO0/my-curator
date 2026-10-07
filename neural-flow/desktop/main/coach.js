@@ -118,9 +118,74 @@ JSON: {"answer": "3~6문장", "actions": ["바로 할 행동 1~3개"]}`
   return { answer: fallbackAnswer(t), actions: [], source: 'rules', tips: t }
 }
 
+// 새 일정 하나를 평가: 겹침 · 체력 · 전략 → 추천/선택/비추천
+// occ: 그 날짜 앞뒤 하루 일정, deadlines: A.deadlines 결과
+function checkFit(item, { occ = [], deadlines = [], coach = {} }) {
+  const c = { ...DEFAULT_COACH, ...coach }
+  const s = toMin(item.start)
+  const len = Number(item.minutes) || 90
+  const span = s == null ? null : { s, e: s + len }
+  const day = spans(occ.filter((o) => o.date === item.date && !o.done))
+  const conflicts = span ? day.filter((x) => x.s < span.e && x.e > span.s).map((x) => `${hm(x.s)} ${x.title}`) : []
+  const protects = (c.protect || []).filter((p) => span && A.weekday(item.date) === p.weekday && toMin(p.start) < span.e && toMin(p.end) > span.s).map((p) => p.label)
+  const dayMin = day.reduce((n, x) => n + (x.e - x.s), 0) + (span ? len : 0)
+  const late = span && toMin(c.quietAfter) != null && span.e > toMin(c.quietAfter)
+  const prevDay = spans(occ.filter((o) => o.date === A.addDays(item.date, -1)))
+  const nextDay = spans(occ.filter((o) => o.date === A.addDays(item.date, 1)))
+  const nextEarly = nextDay.find((x) => x.s < 9 * 60)
+  const near = deadlines.filter((d) => Math.abs(A.diffDays(item.date, d.date)) <= 2)
+  let energy = dayMin > c.dailyLimitMin ? '빡빡' : dayMin > c.dailyLimitMin * 0.6 ? '보통' : '여유'
+  if (late && energy === '여유') energy = '보통'
+  const notes = []
+  if (conflicts.length) notes.push(`겹침: ${conflicts.join(', ')}`)
+  if (protects.length) notes.push(`${protects.join(', ')} 시간과 겹침`)
+  if (late) notes.push(`${c.quietAfter} 이후 쉬는 시간 침범`)
+  if (nextEarly) notes.push(`다음 날 ${hm(nextEarly.s)} ${nextEarly.title}`)
+  if (near.length) notes.push(`가까운 마감: ${near.map((d) => d.title).join(', ')}`)
+  notes.push(`그날 일정 총 ${Math.round(dayMin / 6) / 10}시간 (전날 ${Math.round(prevDay.reduce((n, x) => n + x.e - x.s, 0) / 6) / 10}시간)`)
+  return { conflicts, protects, late: !!late, energy, dayMin, notes }
+}
+
+async function evaluate(item, { occ = [], deadlines = [], coach = {}, profile = {}, llm }) {
+  const fit = checkFit(item, { occ, deadlines, coach })
+  const c = { ...DEFAULT_COACH, ...coach }
+  const hard = fit.conflicts.length || fit.protects.length
+  const base = {
+    ...fit,
+    verdict: hard ? '비추천' : fit.energy === '빡빡' ? '선택' : '추천',
+    strategy: '',
+    advice: hard ? '겹치는 일정이 있어요. 어느 쪽이 더 중요한지 정하고 하나는 옮기세요.' : fit.energy === '빡빡' ? '그날이 빡빡해요. 참석한다면 다른 일 하나를 미루세요.' : '일정상 무리는 없어요.',
+    source: 'rules',
+  }
+  if (!ready(llm)) return { ...base, strategy: 'AI 엔진이 꺼져 있어 전략 평가는 못 했어요.' }
+  const prompt = `너는 사용자의 일정 코치다. 새 일정 후보를 평가하라. 아첨하지 말고 솔직하게, 근거는 아래 정보에서만.
+[후보] ${item.title} / ${item.date} ${item.start || '시각 미정'} ${item.minutes ? `${item.minutes}분` : ''}
+[요약] ${item.summary || ''}
+[비전·목표] ${JSON.stringify({ vision: profile.vision || {}, goals: profile.goals || {} }).slice(0, 1500)}
+[영역] ${(profile.domains || []).map((d) => d.name).join(', ')}
+[리듬 원칙] ${c.principles}
+[자동 점검] ${fit.notes.join(' / ')} / 체력 ${fit.energy}
+[주변 일정]
+${agendaText(occ, A.addDays(item.date, -1)).split('\n').slice(0, 3).join('\n')}
+JSON: {"verdict":"추천|선택|비추천","energy":"여유|보통|빡빡","strategy":"인생·커리어 전략상 의미 2문장 (목표와 연결되는지)","advice":"참석 여부와 준비/조정 방법 2문장"}`
+  try {
+    const r = await callJson(llm, prompt, { temperature: 0.4 })
+    return {
+      ...base,
+      verdict: ['추천', '선택', '비추천'].includes(r.verdict) ? r.verdict : base.verdict,
+      energy: ['여유', '보통', '빡빡'].includes(r.energy) ? r.energy : base.energy,
+      strategy: String(r.strategy || ''),
+      advice: String(r.advice || base.advice),
+      source: llm.provider || 'llm',
+    }
+  } catch (e) {
+    return { ...base, strategy: `AI 평가 실패: ${e.message.slice(0, 80)}`, error: e.message }
+  }
+}
+
 function fallbackAnswer(t) {
   if (!t.length) return 'AI 엔진이 꺼져 있어 자세한 답은 못 해요. 일정상 특이사항은 없어요.'
   return 'AI 엔진이 꺼져 있어 일정 점검 결과만 알려 드려요. ' + t.map((x) => x.text).join(' ')
 }
 
-module.exports = { tips, ask, DEFAULT_COACH, spans }
+module.exports = { tips, ask, checkFit, evaluate, DEFAULT_COACH, spans }

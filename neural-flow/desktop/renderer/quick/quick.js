@@ -27,6 +27,7 @@ function preview() {
   const where = { event: S?.account ? '구글 캘린더' : '앱 일정', task: '활동 보드', one_thing: '오늘의 단 하나', note: '메모' }[item.kind]
   $body.innerHTML = `<div class="card"><span class="kind">${icon(ic, 22)}</span>
     <div class="what"><b>${esc(item.title)}</b><span>${esc([label, when, item.minutes ? `${item.minutes}분` : '', `→ ${where}`].filter(Boolean).join(' · '))}</span></div></div>
+    ${item.eval ? `<div class="answer">${UI.evalCard(item.eval)}</div>` : ''}
     <div class="foot"><span><kbd>Enter</kbd>추가 · 고치려면 계속 입력</span><span>${item.source && item.source !== 'rules' ? 'AI 해석' : '규칙 해석'}</span></div>`
 
 }
@@ -34,7 +35,8 @@ function preview() {
 
 
 async function submit() {
-  const text = $q.value.trim()
+  const shown = $q.value.trim()
+  const text = pasted && shown.startsWith('📄') ? pasted : shown
   if (!text || busy) return
   if (item && item._text === text) {
     busy = true
@@ -42,6 +44,7 @@ async function submit() {
     busy = false
     $body.innerHTML = `<div class="done">✓ ${esc(r?.message || '추가했어요')}</div>`
     item = null
+    pasted = null
     $q.value = ''
     setTimeout(() => {
       nf.hideQuick()
@@ -51,7 +54,7 @@ async function submit() {
   }
   if (/^[?？]/.test(text)) return askCoach(text)
   busy = true
-  $body.innerHTML = `<div class="msg">해석하는 중…</div>`
+  $body.innerHTML = `<div class="msg">${text === pasted ? '공문을 읽고 일정·체력·전략을 평가하는 중…' : '해석하는 중…'}</div>`
   try {
     item = { ...(await nf.previewInput(text)), _text: text }
     preview()
@@ -91,12 +94,25 @@ document.addEventListener('keydown', (e) => {
   }
 })
 $q.addEventListener('input', () => {
+  if (!$q.value.trim().startsWith('📄')) pasted = null
   if (!item && !$q.value.trim()) hints()
-  if (item && $q.value.trim() !== item._text) {
+  if (item && $q.value.trim() !== item._text && item._text !== pasted) {
     item = null
     hints()
   }
 })
+// 여러 줄 공문을 붙여넣으면 한 줄 입력창 대신 원문 전체로 해석한다
+let pasted = null
+$q.addEventListener('paste', (e) => {
+  const t = e.clipboardData?.getData('text') || ''
+  if (!/\n/.test(t.trim())) return
+  e.preventDefault()
+  pasted = t
+  $q.value = `📄 ${t.trim().split(/\r?\n/)[0].slice(0, 40)}… (공문 ${t.trim().split(/\r?\n/).length}줄)`
+  item = null
+  submit()
+})
+
 $body.addEventListener('click', (e) => {
   const ex = e.target.closest('[data-ex]')
   if (ex) {

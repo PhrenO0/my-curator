@@ -168,9 +168,12 @@ function renderAskPreview() {
     <button class="btn sm" data-act="ask-cancel">취소</button>
     <button class="btn sm primary" data-act="ask-commit">${icon('corner-down-left', 14)}추가</button>
   </div>`
+    + (askItem.eval ? UI.evalCard(askItem.eval) : '')
 }
+let askPasted = null
 async function askSubmit() {
-  const text = $askInput.value.trim()
+  const shown = $askInput.value.trim()
+  const text = askPasted && shown.startsWith('📄') ? askPasted : shown
   if (!text) return
   if (askItem && askItem._text === text) return askCommit()
   askItem = { ...(await nf.previewInput(text)), _text: text }
@@ -181,9 +184,20 @@ async function askCommit() {
   const r = await nf.commitInput(askItem)
   toast(r?.message || '추가했어요')
   askItem = null
+  askPasted = null
   $askInput.value = ''
   renderAskPreview()
 }
+// 여러 줄 공문 붙여넣기 → 원문 전체를 해석·평가
+$askInput.addEventListener('paste', (e) => {
+  const t = e.clipboardData?.getData('text') || ''
+  if (!/\n/.test(t.trim())) return
+  e.preventDefault()
+  askPasted = t
+  $askInput.value = `📄 ${t.trim().split(/\r?\n/)[0].slice(0, 40)}… (공문)`
+  $askPreview.innerHTML = '<div class="muted small">공문을 읽고 평가하는 중…</div>'
+  askSubmit()
+})
 $ask.addEventListener('submit', (e) => {
   e.preventDefault()
   askSubmit()

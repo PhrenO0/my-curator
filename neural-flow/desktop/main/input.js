@@ -72,6 +72,7 @@ function parseRules(text, today) {
   } else if ((m = take(/(?<!\d)(\d{1,2}):(\d{2})(?!\d)/))) start = `${m[1].padStart(2, '0')}:${m[2]}`
 
   const title = s
+    .replace(/\(\s*[일월화수목금토]\s*\)/g, ' ')
     .replace(/\s+(에|에서|까지|부터)(?=\s)/g, ' ')
     .replace(/^\s*(에|에서)\s+/, ' ')
     .replace(/\s{2,}/g, ' ')
@@ -81,7 +82,72 @@ function parseRules(text, today) {
   return { kind, title: title || text.trim(), date, start, minutes, source: 'rules' }
 }
 
+// 공문·안내문(여러 줄, 긴 글) — 날짜·시각·제목·링크를 뽑는다
+const isAnnouncement = (text) => /\n/.test(text.trim()) || text.trim().length > 120
+const DATE_RE = /(\d{1,2})\/(\d{1,2})|\d{1,2}\s*월\s*\d{1,2}\s*일|\d{4}-\d{1,2}-\d{1,2}/
+
+function parseAnnouncement(text, today) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const link = (text.match(/https?:\/\/[^\s)>\]]+/) || [null])[0]
+  // 날짜·시각이 함께 있는 첫 줄을 우선, 없으면 날짜만 있는 첫 줄
+  let when = null
+  for (const l of lines) {
+    if (!DATE_RE.test(l)) continue
+    const r = parseRules(l, today)
+    if (r.date && r.start) {
+      when = r
+      break
+    }
+    if (!when) when = r
+  }
+  return {
+    kind: when ? 'event' : 'task',
+    title: (lines[0] || '공문').replace(/https?:\/\/\S+/g, '').trim().slice(0, 80),
+    date: when?.date || null,
+    start: when?.start || null,
+    minutes: when?.minutes || null,
+    link,
+    summary: lines.slice(1, 4).join(' ').slice(0, 200),
+    announcement: true,
+    source: 'rules',
+  }
+}
+
+async function interpretAnnouncement(text, { today, llm, profile }) {
+  const rules = parseAnnouncement(text, today)
+  if (!ready(llm)) return rules
+  const prompt = `너는 일정 비서다. 사용자가 붙여넣은 공문·안내문에서 참석해야 할 일정 하나를 뽑아라.
+오늘: ${today} (${A.WEEKDAYS[A.weekday(today)]}요일), 시간대: 한국
+9개 영역: ${JSON.stringify((profile?.domains || []).map((d) => d.name))}
+----- 공문 시작 -----
+${text.slice(0, 4000)}
+----- 공문 끝 -----
+아래 JSON 만 출력하라 (모르면 null, 지어내지 마라):
+{"title":"짧은 일정 제목","date":"YYYY-MM-DD 또는 null","start":"HH:mm 또는 null","minutes":숫자 또는 null,"location":"장소/온라인 또는 null","link":"URL 또는 null","summary":"한두 문장 요약","domain":"9개 영역 중 하나 또는 빈 문자열"}`
+  try {
+    const out = await callJson(llm, prompt, { temperature: 0.1, timeoutMs: providerOf(llm) === 'claude' ? 90000 : 30000 })
+    if (!out.title) throw new Error('형식 오류')
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(out.date || '') ? out.date : rules.date
+    return {
+      kind: date ? 'event' : 'task',
+      title: String(out.title).trim().slice(0, 80),
+      date,
+      start: /^\d{2}:\d{2}$/.test(out.start || '') ? out.start : rules.start,
+      minutes: Number(out.minutes) || rules.minutes || null,
+      location: out.location || '',
+      link: out.link || rules.link,
+      summary: out.summary || rules.summary,
+      domain: out.domain || '',
+      announcement: true,
+      source: providerOf(llm),
+    }
+  } catch (e) {
+    return { ...rules, error: e.message }
+  }
+}
+
 async function interpret(text, { today, llm, profile }) {
+  if (isAnnouncement(text)) return interpretAnnouncement(text, { today, llm, profile })
   const rules = parseRules(text, today)
   if (!ready(llm)) return rules
   const prompt = `너는 일정 비서다. 사용자가 데스크탑에서 빠르게 입력한 한 줄을 구조화하라.
@@ -113,4 +179,4 @@ kind 규칙: 날짜나 시각이 있는 약속·일정 = "event", 해야 할 일
   }
 }
 
-module.exports = { parseRules, interpret }
+module.exports = { parseRules, parseAnnouncement, isAnnouncement, interpret }

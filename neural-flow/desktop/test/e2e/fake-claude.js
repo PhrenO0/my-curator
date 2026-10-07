@@ -8,7 +8,11 @@ let input = ''
 process.stdin.on('data', (d) => (input += d))
 process.stdin.on('end', () => {
   let body
-  if (input.includes('일정 코치')) {
+  if (input.includes('붙여넣은 공문')) {
+    body = { title: 'CLAUDE: AI 설명회', date: '2026-10-12', start: '20:00', minutes: 90, location: '온라인', link: null, summary: '무료 설명회', domain: '' }
+  } else if (input.includes('새 일정 후보')) {
+    body = { verdict: '추천', energy: '여유', strategy: 'CLAUDE 전략: 커리어 목표와 맞음', advice: '참석하세요' }
+  } else if (input.includes('일정 코치')) {
     body = { answer: 'CLAUDE 코치: 오늘은 하나만 하세요.', actions: ['20:00 자소서 30분'] }
   } else if (input.includes('일정 비서')) {
     body = { kind: 'task', title: 'CLAUDE: 포트폴리오 정리', date: null, start: null, minutes: 45, domain: '💼 일·소명', reply: 'ok' }

@@ -37,3 +37,32 @@ test('AI 엔진이 없으면 규칙 점검으로 답한다', async () => {
   assert.equal(r.source, 'rules')
   assert.match(r.answer, /야간/)
 })
+
+test('공문 붙여넣기: 날짜·시각·제목 추출', () => {
+  const { parseAnnouncement, isAnnouncement } = require('../main/input.js')
+  const text = `[AI 프로덕트 빌더 클럽] 빅테크 멘토 3인의 AI 프로덕트 빌딩 설명회
+안녕하세요, 윤민정/네오/김시현입니다.
+10/12(월) 저녁 8시, AI 프로덕트 빌딩 무료 설명회를 진행합니다.
+https://example.com/form`
+  assert.ok(isAnnouncement(text))
+  assert.ok(!isAnnouncement('내일 3시 커피챗'))
+  const r = parseAnnouncement(text, '2026-10-07')
+  assert.equal(r.kind, 'event')
+  assert.equal(r.date, '2026-10-12')
+  assert.equal(r.start, '20:00')
+  assert.match(r.title, /^\[AI 프로덕트 빌더 클럽\]/)
+  assert.equal(r.link, 'https://example.com/form')
+})
+
+test('새 일정 평가: 겹침 → 비추천, 여유 → 추천 (규칙)', async () => {
+  const occ = [ev('2026-10-12', '19:00', '21:00', '스터디'), ev('2026-10-13', '08:00', '10:00', '1교시')]
+  const item = { title: '설명회', date: '2026-10-12', start: '20:00', minutes: 60 }
+  const bad = await coach.evaluate(item, { occ, deadlines: [{ title: '레포트', date: '2026-10-13', d: 6 }], llm: { provider: 'none' } })
+  assert.equal(bad.verdict, '비추천')
+  assert.deepEqual(bad.conflicts, ['19:00 스터디'])
+  assert.ok(bad.notes.some((n) => /다음 날 08:00 1교시/.test(n)))
+  assert.ok(bad.notes.some((n) => /레포트/.test(n)))
+  const ok = await coach.evaluate({ ...item, date: '2026-10-14' }, { occ, llm: { provider: 'none' } })
+  assert.equal(ok.verdict, '추천')
+  assert.equal(ok.energy, '여유')
+})

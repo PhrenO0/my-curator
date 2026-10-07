@@ -370,7 +370,24 @@ async function askCoach(question) {
 async function previewInput(text) {
   const t = String(text || '').trim()
   if (!t) return null
-  return withBusy('input', () => interpret(t, { today: A.ymd(new Date()), llm: llm(), profile: store.get().profile }))
+  return withBusy('input', async () => {
+    const item = await interpret(t, { today: A.ymd(new Date()), llm: llm(), profile: store.get().profile })
+    if (item?.kind === 'event' && item.date) item.eval = await evaluateItem(item)
+    return item
+  })
+}
+
+// 새 일정 평가: 공문은 AI 까지(전략), 짧은 입력은 규칙(겹침·체력)만 — 미리보기가 느려지지 않게
+async function evaluateItem(item) {
+  try {
+    const d = store.get()
+    const occ = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities, doneMap: d.doneMap || {} }, A.addDays(item.date, -1), A.addDays(item.date, 1))
+    const ctx = { occ, deadlines: A.deadlines({ events: d.events, activities: d.activities }, A.ymd(new Date()), 60), coach: d.settings.coach, profile: d.profile }
+    return item.announcement ? await coach.evaluate(item, { ...ctx, llm: llm() }) : { ...coach.checkFit(item, ctx), source: 'rules' }
+  } catch (e) {
+    console.error('[evaluate]', e)
+    return null
+  }
 }
 
 function endOf(start, minutes) {
@@ -405,7 +422,8 @@ async function commitInput(item) {
     return { ok: true, message: '활동 보드에 추가했어요' }
   }
   // event: 로그인돼 있으면 구글 캘린더, 아니면 앱 안 일정
-  const ev = { title: item.title, date: item.date || today, start: item.start || null, minutes: item.minutes || 60, note: '' }
+  const note = [item.summary, item.link, item.eval?.strategy && `[코치] ${item.eval.verdict} · ${item.eval.strategy}`].filter(Boolean).join('\n')
+  const ev = { title: item.title, date: item.date || today, start: item.start || null, minutes: item.minutes || 60, note, location: item.location || '' }
   const gc = item.target !== 'local' && googleClient()
   if (gc) {
     try {
@@ -418,7 +436,7 @@ async function commitInput(item) {
     }
   }
   store.update((x) =>
-    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: endOf(ev.start, item.minutes), domain: item.domain || '', note: '', repeat: null, deadline: false, source: 'local' })
+    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: endOf(ev.start, item.minutes), domain: item.domain || '', note, repeat: null, deadline: false, source: 'local' })
   )
   log('앱 일정에 추가')
   return { ok: true, message: gc ? '구글 저장에 실패해 앱 일정에 넣었어요' : '일정에 추가했어요' }
