@@ -54,6 +54,21 @@ function clockCard() {
   </section>`
 }
 
+// 코치: 일정을 보고 먼저 건네는 말 (규칙 기반, 매 갱신마다)
+function coachCard() {
+  const t = S.coachTips || []
+  if (!t.length) return ''
+  const ic = { warn: 'flag', info: 'clock', good: 'sparkles' }
+  return `
+  <section class="card coach">
+    <div class="card-h">${icon('bot', 13)}<span class="grow">코치</span><button class="link-btn" data-act="ask">물어보기</button></div>
+    ${t
+      .slice(0, 3)
+      .map((x) => `<div class="tip ${x.level}">${icon(ic[x.level] || 'clock', 13)}<span>${esc(x.text)}</span></div>`)
+      .join('')}
+  </section>`
+}
+
 function oneThingCard() {
   const b = S.brief && S.brief.date === S.today ? S.brief : null
   if (!b) {
@@ -227,6 +242,7 @@ function render() {
     editBar() +
     clockCard() +
     (sec.showOneThing !== false ? oneThingCard() : '') +
+    (sec.showCoach !== false ? coachCard() : '') +
     (sec.showCalendar !== false ? calendarCard(occ, dayItems) : '') +
     briefingCard()
 }
@@ -238,6 +254,7 @@ root.addEventListener('click', async (e) => {
   e.preventDefault()
   const act = el.dataset.act
   if (act === 'one') return nf.toggleOneThing()
+  if (act === 'ask') return nf.openQuick()
   if (act === 'quick') return nf.openQuick()
   if (act === 'occ') return nf.toggleOccurrence(el.dataset.key)
   if (act === 'brief') return nf.run('brief')

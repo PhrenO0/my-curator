@@ -141,3 +141,24 @@ body {
   color: #fff;
   font-weight: 600;
 }
+
+/* 코치 답변 */
+.answer {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 4px 24px 12px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.answer p {
+  margin: 0 0 8px;
+}
+.answer ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--accent);
+}
+.answer li span,
+.answer li {
+  margin: 2px 0;
+}

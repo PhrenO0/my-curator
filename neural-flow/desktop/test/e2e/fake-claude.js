@@ -8,7 +8,9 @@ let input = ''
 process.stdin.on('data', (d) => (input += d))
 process.stdin.on('end', () => {
   let body
-  if (input.includes('일정 비서')) {
+  if (input.includes('일정 코치')) {
+    body = { answer: 'CLAUDE 코치: 오늘은 하나만 하세요.', actions: ['20:00 자소서 30분'] }
+  } else if (input.includes('일정 비서')) {
     body = { kind: 'task', title: 'CLAUDE: 포트폴리오 정리', date: null, start: null, minutes: 45, domain: '💼 일·소명', reply: 'ok' }
   } else {
     body = { greeting: 'g', one_thing: 'CLAUDE: 오늘의 단 하나', one_thing_why: 'w', holiness_line: 'h', stuck_coaching: 's', trend: '' }

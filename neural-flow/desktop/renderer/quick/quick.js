@@ -11,7 +11,7 @@ const KIND = {
   one_thing: ['target', '오늘의 단 하나'],
   note: ['sticky-note', '메모'],
 }
-const EXAMPLES = ['내일 오후 3시 커피챗', '금요일 7시 반 스터디 2시간', '!자소서 1문항 끝내기', '포트폴리오 케이스 정리', '메모: 위젯 아이디어']
+const EXAMPLES = ['?이번 주 무리 없어?', '내일 오후 3시 커피챗', '금요일 7시 반 스터디 2시간', '!자소서 1문항 끝내기', '포트폴리오 케이스 정리', '메모: 위젯 아이디어']
 let S = null
 let item = null
 let busy = false
@@ -49,11 +49,29 @@ async function submit() {
     }, 900)
     return
   }
+  if (/^[?？]/.test(text)) return askCoach(text)
   busy = true
   $body.innerHTML = `<div class="msg">해석하는 중…</div>`
   try {
     item = { ...(await nf.previewInput(text)), _text: text }
     preview()
+  } catch (e) {
+    $body.innerHTML = `<div class="msg">${esc(e.message)}</div>`
+  }
+  busy = false
+}
+
+// "?질문" → 코치에게 묻기 (일정·D-day·리듬 원칙을 보고 답한다)
+async function askCoach(text) {
+  busy = true
+  item = null
+  $body.innerHTML = `<div class="msg">${icon('sparkles', 16)} 일정을 보고 생각하는 중…</div>`
+  try {
+    const r = await nf.askCoach(text)
+    if (!r) throw new Error('지금은 답할 수 없어요. 잠시 뒤 다시 물어보세요.')
+    $body.innerHTML = `<div class="answer"><p>${esc(r.answer)}</p>
+      ${r.actions?.length ? `<ul>${r.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}</div>
+      <div class="foot"><span>${r.source === 'rules' ? '규칙 점검' : r.source === 'claude' ? 'Claude Code' : 'Gemini'}${r.error ? ` · AI 실패: ${esc(r.error.slice(0, 60))}` : ''}</span><span><kbd>Esc</kbd>닫기</span></div>`
   } catch (e) {
     $body.innerHTML = `<div class="msg">${esc(e.message)}</div>`
   }
@@ -73,6 +91,7 @@ document.addEventListener('keydown', (e) => {
   }
 })
 $q.addEventListener('input', () => {
+  if (!item && !$q.value.trim()) hints()
   if (item && $q.value.trim() !== item._text) {
     item = null
     hints()

@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS = {
     privacyMode: false, // 위젯 내용 가리기
   },
   updates: { autoCheck: true, skipVersion: '' },
+  coach: structuredClone(require('./coach.js').DEFAULT_COACH),
   widget: {
     visible: true,
     x: null,
@@ -65,6 +66,7 @@ const DEFAULT_SETTINGS = {
     theme: 'auto',
     clickThrough: false,
     showOneThing: true,
+    showCoach: true,
     showCalendar: true,
     showNews: true,
     showEnglish: true,
@@ -183,6 +185,7 @@ function mergeSettings(saved) {
     google: { ...base.google, ...(saved.google || {}) },
     security: { ...base.security, ...(saved.security || {}) },
     updates: { ...base.updates, ...(saved.updates || {}) },
+    coach: { ...base.coach, ...(saved.coach || {}) },
   }
 }
 
