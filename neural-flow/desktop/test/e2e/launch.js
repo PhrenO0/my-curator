@@ -28,6 +28,8 @@ const child = spawn(bin, args, {
     NF_TEST_HOOK: path.join(__dirname, 'hook.js'),
     NF_DATA_DIR: dataDir,
     NF_BUILD_CONFIG: buildConfig,
+    NF_UPDATE_API: `http://127.0.0.1:${port}`,
+    NF_UPDATE_DRYRUN: '1',
     NF_E2E_PORT: port,
     NF_GEMINI_BASE: `http://127.0.0.1:${port}`,
     // 가짜 구글 (로그인·캘린더)

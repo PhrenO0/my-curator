@@ -18,7 +18,11 @@ const {
   safeStorage,
   globalShortcut,
   powerMonitor,
+  session,
+  dialog,
 } = require('electron')
+const updater = require('./updater.js')
+const security = require('./security.js')
 
 const { Store, uid } = require('./store.js')
 const A = require('../renderer/shared/agenda.js')
@@ -85,7 +89,18 @@ function applyBuildConfig() {
 }
 
 // ── 로그인 (허용된 구글 계정만) ──────────────────────────────────────────────
-const locked = () => store.get().settings.requireLogin !== false && !store.get().account?.email
+// 세션 잠금: PIN 이 있을 때 자리 비움·화면 잠금 뒤 다시 잠근다 (PIN 으로 해제)
+let sessionLocked = false
+const needsLogin = () => store.get().settings.requireLogin !== false && !store.get().account?.email
+const locked = () => needsLogin() || sessionLocked
+function lockSession(reason) {
+  if (!store.get().settings.security.pinHash || sessionLocked) return
+  sessionLocked = true
+  console.log(`[security] 잠금: ${reason}`)
+  quick?.hide()
+  broadcast()
+}
+let update = { checking: false, available: false } // 업데이트 상태 (화면 표시용)
 let gclient = null
 function googleClient() {
   const d = store.get()
@@ -151,13 +166,20 @@ function llm() {
 // ── 화면에 보낼 스냅샷 (비밀값 제외) ─────────────────────────────────────────
 function snapshot() {
   const d = store.get()
-  const { geminiKeyEnc, geminiKeyPlain, google: g, ...settings } = d.settings
+  const { geminiKeyEnc, geminiKeyPlain, google: g, security: sec, ...settings } = d.settings
+  const { pinHash, ...secPublic } = sec
   const k = getKey()
   const { clientSecretEnc, clientSecretPlain, ...gPublic } = g
   const base = {
     today: A.ymd(new Date()),
     platform: process.platform,
     locked: locked(),
+    sessionLocked,
+    needsLogin: needsLogin(),
+    version: app.getVersion(),
+    update: { ...update },
+    privacy: !!d.settings.security.privacyMode,
+    encrypted: store.encrypted,
     account: d.account ? { email: d.account.email, name: d.account.name, picture: d.account.picture } : null,
     busy: { ...busy },
     widgetMode,
@@ -165,6 +187,7 @@ function snapshot() {
   const pub = {
     ...settings,
     google: { ...gPublic, hasSecret: !!(clientSecretEnc || clientSecretPlain) },
+    security: { ...secPublic, hasPin: !!pinHash, canEncrypt: safeStorage.isEncryptionAvailable() },
     hasKey: !!k.key,
     keySource: k.source,
     claudeVersion,
@@ -432,6 +455,7 @@ function createWidget() {
   desktopPin?.stop()
   desktopPin = null
   widget = new BrowserWindow(opts)
+  protect(widget)
   if (IS_MAC) widget.setVisibleOnAllWorkspaces(true)
   widget.loadFile(path.join(ROOT, 'renderer', 'widget', 'index.html'))
   widget.once('ready-to-show', () => {
@@ -493,6 +517,7 @@ function openManager(view) {
     ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 } } : {}),
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
   })
+  protect(manager)
   manager.loadFile(path.join(ROOT, 'renderer', 'app', 'index.html'), { hash: view || 'today' })
   manager.once('ready-to-show', () => manager.show())
   manager.on('closed', () => (manager = null))
@@ -518,6 +543,7 @@ function toggleQuick() {
       backgroundColor: '#00000000',
       webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
     })
+    protect(quick)
     quick.loadFile(path.join(ROOT, 'renderer', 'quick', 'index.html'))
     quick.on('blur', () => !TEST_HOOK && quick?.hide())
     quick.on('closed', () => (quick = null))
@@ -570,15 +596,98 @@ function buildTray() {
       { label: '지금 브리핑 만들기', click: () => jobs.morning() },
       { label: '뉴스 새로고침', click: () => runNews() },
       { type: 'separator' },
+      ...(update.available ? [{ label: `업데이트 ${update.version} 설치`, click: () => installUpdate() }] : []),
+      {
+        label: `가리기 모드 (${IS_MAC ? '⌘⌥P' : 'Ctrl+Alt+P'})`,
+        type: 'checkbox',
+        checked: !!s.security.privacyMode,
+        click: () => togglePrivacy(),
+      },
+      ...(s.security.pinHash ? [{ label: '지금 잠그기', click: () => lockSession('트레이') }] : []),
       { label: '종료', role: 'quit' },
     ])
   )
 }
 
+// ── 보안 ─────────────────────────────────────────────────────────────────────
+function protect(win) {
+  // 화면 공유·캡처(Zoom·디스코드·캡처 도구)에 이 창이 찍히지 않게 (Windows·macOS)
+  if (win && !win.isDestroyed()) win.setContentProtection(!!store.get().settings.security.contentProtection && !TEST_HOOK)
+}
+function togglePrivacy() {
+  store.update((d) => (d.settings.security.privacyMode = !d.settings.security.privacyMode))
+  buildTray()
+}
+function hardenSession() {
+  // 카메라·마이크·위치·알림 외 권한 요청은 모두 거절 (앱은 아무 권한도 필요 없다)
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(false))
+  session.defaultSession.setPermissionCheckHandler(() => false)
+}
+function startSecurityWatch() {
+  powerMonitor.on('lock-screen', () => store.get().settings.security.lockOnScreenLock && lockSession('화면 잠금'))
+  powerMonitor.on('suspend', () => store.get().settings.security.lockOnScreenLock && lockSession('절전'))
+  setInterval(() => {
+    const min = Number(store.get().settings.security.idleLockMinutes) || 0
+    if (min > 0 && powerMonitor.getSystemIdleTime() >= min * 60) lockSession('자리 비움')
+  }, 30000)
+}
+
+// ── 업데이트 ─────────────────────────────────────────────────────────────────
+let notifiedVersion = ''
+async function checkUpdate({ manual = false } = {}) {
+  update = { ...update, checking: true, error: '' }
+  broadcast()
+  try {
+    const r = await updater.check(app.getVersion())
+    update = { ...r, checking: false }
+    const skip = store.get().settings.updates.skipVersion
+    if (r.available && r.version !== notifiedVersion && (manual || r.version !== skip)) {
+      notifiedVersion = r.version
+      notify(`⬆️ neural-flow ${r.version} 업데이트`, '설정 또는 트레이에서 한 번에 설치할 수 있어요', 'settings')
+    }
+  } catch (e) {
+    update = { ...update, checking: false, error: e.message }
+  }
+  broadcast()
+  buildTray()
+  return update
+}
+function startUpdateWatch() {
+  if (TEST_HOOK) return
+  const run = () => store.get().settings.updates.autoCheck && checkUpdate()
+  setTimeout(run, 15000)
+  setInterval(run, 6 * 3600 * 1000)
+}
+async function installUpdate() {
+  if (!update.available || !update.asset) return { ok: false, message: '받을 업데이트가 없어요' }
+  if (!app.isPackaged && !process.env.NF_UPDATE_DRYRUN) return { ok: false, message: '개발 실행 중이에요 — git pull 로 업데이트하세요' }
+  try {
+    update = { ...update, downloading: 0 }
+    broadcast()
+    const got = await updater.download(update.asset, (p) => {
+      update.downloading = Math.round(p * 100)
+      broadcast()
+    })
+    update = { ...update, downloading: null, verified: got.verified, file: got.file }
+    if (process.env.NF_UPDATE_DRYRUN) {
+      broadcast()
+      return { ok: true, dryRun: true, verified: got.verified, sha256: got.sha256 }
+    }
+    store.flush()
+    updater.install(got.file, { appPath: IS_MAC ? path.resolve(app.getAppPath(), '..', '..', '..') : undefined })
+    setTimeout(() => app.exit(0), 500)
+    return { ok: true }
+  } catch (e) {
+    update = { ...update, downloading: null, error: e.message }
+    broadcast()
+    return { ok: false, message: e.message }
+  }
+}
+
 // ── IPC ──────────────────────────────────────────────────────────────────────
 function registerIpc() {
   // 잠겨 있을 때도 쓸 수 있는 채널만 열어 두고, 나머지는 로그인 전 거부
-  const OPEN = new Set(['nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:auth:simple', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open'])
+  const OPEN = new Set(['nf:security:unlock', 'nf:update:check', 'nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:auth:simple', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open'])
   const handle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = (ch, fn) =>
     handle(ch, (...args) => {
@@ -587,6 +696,57 @@ function registerIpc() {
     })
 
   ipcMain.handle('nf:snapshot', () => snapshot())
+
+  // PIN 해제 — 5번 틀리면 30초 대기
+  let fails = 0
+  let waitUntil = 0
+  ipcMain.handle('nf:security:unlock', (_e, pin) => {
+    if (Date.now() < waitUntil) return { ok: false, message: `잠시 후 다시 시도하세요 (${Math.ceil((waitUntil - Date.now()) / 1000)}초)` }
+    if (security.verifyPin(String(pin || ''), store.get().settings.security.pinHash)) {
+      fails = 0
+      sessionLocked = false
+      broadcast()
+      return { ok: true }
+    }
+    fails++
+    if (fails >= 5) {
+      waitUntil = Date.now() + 30000
+      fails = 0
+    }
+    return { ok: false, message: 'PIN 이 맞지 않아요' }
+  })
+  ipcMain.handle('nf:security:set-pin', (_e, pin) => {
+    const p = String(pin || '')
+    if (p && !/^\d{4,8}$/.test(p)) return { ok: false, message: 'PIN 은 숫자 4~8자리' }
+    store.update((d) => (d.settings.security.pinHash = p ? security.hashPin(p) : ''))
+    buildTray()
+    return { ok: true }
+  })
+  ipcMain.handle('nf:security:lock', () => lockSession('직접'))
+  ipcMain.handle('nf:security:privacy', () => togglePrivacy())
+  ipcMain.handle('nf:security:apply', () => [widget, manager, quick].forEach(protect))
+  ipcMain.handle('nf:data:export', async () => {
+    const r = await dialog.showSaveDialog(manager || undefined, { defaultPath: `neural-flow-백업-${A.ymd(new Date())}.json` })
+    if (r.canceled || !r.filePath) return { ok: false }
+    const { settings, account, ...rest } = store.get()
+    const { geminiKeyEnc, geminiKeyPlain, google, security: sec, ...safeSettings } = settings
+    fs.writeFileSync(r.filePath, JSON.stringify({ exportedAt: new Date().toISOString(), settings: safeSettings, ...rest }, null, 2), { mode: 0o600 })
+    return { ok: true, path: r.filePath }
+  })
+  ipcMain.handle('nf:data:wipe', async () => {
+    // 구글 토큰 폐기 → 데이터 파일 삭제 → 다시 시작
+    const refresh = dec(store.get().account?.refreshEnc)
+    if (refresh) await fetch(`${process.env.NF_GOOGLE_REVOKE || 'https://oauth2.googleapis.com/revoke'}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `token=${encodeURIComponent(refresh)}` }).catch(() => {})
+    try {
+      fs.rmSync(store.file, { force: true })
+    } catch {}
+    if (TEST_HOOK) return { ok: true }
+    app.relaunch()
+    app.exit(0)
+  })
+  ipcMain.handle('nf:update:check', () => checkUpdate({ manual: true }))
+  ipcMain.handle('nf:update:install', () => installUpdate())
+  ipcMain.handle('nf:update:skip', () => store.update((d) => (d.settings.updates.skipVersion = update.version || '')))
 
   // 로그인 설정(클라이언트 ID/시크릿)은 잠금 화면에서 입력한다
   ipcMain.handle('nf:auth:config', (_e, { clientId, clientSecret } = {}) => {
@@ -761,7 +921,12 @@ function registerIpc() {
   ipcMain.handle('nf:settings:save', (_e, patch = {}) => {
     const icsBefore = JSON.stringify(store.get().settings.icsUrls) // 값으로 복사 (객체는 아래에서 바뀜)
     store.update((d) => {
-      const { widget: w, schedule: sc, google: g, geminiKeyEnc, geminiKeyPlain, ...rest } = patch
+      const { widget: w, schedule: sc, google: g, security: sec, updates: up, geminiKeyEnc, geminiKeyPlain, ...rest } = patch
+      if (sec) {
+        const { pinHash, hasPin, canEncrypt, ...safe } = sec // PIN 은 nf:security:set-pin 으로만
+        Object.assign(d.settings.security, safe)
+      }
+      if (up) Object.assign(d.settings.updates, up)
       Object.assign(d.settings, rest)
       if (w) Object.assign(d.settings.widget, w)
       if (sc) Object.assign(d.settings.schedule, sc)
@@ -774,6 +939,8 @@ function registerIpc() {
     if (patch.widget?.theme) nativeTheme.themeSource = after.widget.theme === 'auto' ? 'system' : after.widget.theme
     if (patch.widget && 'width' in patch.widget) createWidget()
     if (patch.widget && 'clickThrough' in patch.widget) applyClickThrough()
+    if (patch.security && 'contentProtection' in patch.security) [widget, manager, quick].forEach(protect)
+    if (patch.security && 'encryptData' in patch.security) store.flush()
     if ('autoStart' in patch) applyAutoStart()
     if (icsBefore !== JSON.stringify(after.icsUrls) || patch.google?.calendarIds !== undefined) runCalendar()
     if (patch.engine || patch.claudeCmd) detectClaude(process.env.NF_CLAUDE_CMD || after.claudeCmd).then((v) => ((claudeVersion = v), broadcast()))
@@ -823,8 +990,15 @@ app.on('web-contents-created', (_e, wc) => {
 
 app.whenReady().then(async () => {
   if (IS_MAC) app.dock?.hide()
-  store = new Store(process.env.NF_DATA_DIR || app.getPath('userData')).load()
+  // 저장 파일 암호화 (OS 키체인). 안 되는 환경(키링 없는 Linux 등)에서는 평문 + 권한 600
+  const cipher = safeStorage.isEncryptionAvailable()
+    ? { encrypt: (str) => safeStorage.encryptString(str), decrypt: (buf) => safeStorage.decryptString(buf) }
+    : null
+  store = new Store(process.env.NF_DATA_DIR || app.getPath('userData'), { cipher }).load()
+  store.flush() // 옛 평문 파일이면 바로 암호화
   applyBuildConfig()
+  hardenSession()
+  if (store.get().settings.security.pinHash) sessionLocked = true // 켤 때마다 PIN
   const theme = store.get().settings.widget.theme
   nativeTheme.themeSource = theme === 'auto' ? 'system' : theme
 
@@ -833,9 +1007,12 @@ app.whenReady().then(async () => {
   createWidget()
   buildTray()
   applyAutoStart()
+  startSecurityWatch()
+  startUpdateWatch()
 
   globalShortcut.register('CommandOrControl+Alt+N', () => setWidgetMode(widgetMode === 'edit' ? 'pinned' : 'edit'))
   globalShortcut.register('CommandOrControl+Alt+M', () => openManager())
+  globalShortcut.register('CommandOrControl+Alt+P', () => togglePrivacy())
   try {
     globalShortcut.register(store.get().settings.quickShortcut || 'CommandOrControl+Shift+Space', toggleQuick)
   } catch (e) {

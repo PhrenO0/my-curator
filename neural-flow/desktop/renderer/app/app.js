@@ -83,6 +83,7 @@ const avatar = (a) =>
 let lockError = ''
 let lockSetup = false
 function renderLock() {
+  if (S.sessionLocked && !S.needsLogin) return renderPinLock()
   const g = S.settings.google || {}
   const owner = (g.allowedEmails || []).join(', ')
   const needSetup = !g.clientId || lockSetup
@@ -122,6 +123,22 @@ function renderLock() {
     }
     ${lockError ? `<div class="err">${esc(lockError)}</div>` : ''}
   </div></div>`
+}
+
+// PIN 잠금 (자리 비움·화면 잠금 뒤)
+function renderPinLock() {
+  if ($lock.contains(document.activeElement) && document.activeElement.matches('input')) return
+  $lock.innerHTML = `<div class="lock"><div class="lock-card">
+    <div class="brand-mark">${icon('lock', 28)}</div>
+    <h1>잠겨 있어요</h1>
+    <p>${S.account ? esc(S.account.email) : 'neural-flow'} · PIN 을 입력하세요</p>
+    <form id="pin-form">
+      <input class="input pin" id="pin" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="••••" autofocus />
+      <button class="btn primary lg block" style="margin-top:12px">열기</button>
+    </form>
+    ${lockError ? `<div class="err">${esc(lockError)}</div>` : ''}
+  </div></div>`
+  setTimeout(() => document.getElementById('pin')?.focus(), 50)
 }
 
 // ── 언제든 입력 (상단 바) ────────────────────────────────────────────────────
@@ -196,6 +213,13 @@ function renderSide() {
       <div class="status"><span class="dot ${S.account ? 'ok' : ''}"></span>${
         S.account ? `구글 캘린더 · ${timeAgo(S.remote.fetchedAt) || '동기화 대기'}` : k.icsUrls?.length ? 'iCal 주소로 읽는 중' : '구글 캘린더 미연결'
       }</div>
+      ${
+        S.update?.available
+          ? `<button class="btn sm soft" data-act="update-install" ${S.update.downloading != null ? 'disabled' : ''}>${icon('sparkles', 13)}${
+              S.update.downloading != null ? `받는 중 ${S.update.downloading}%` : `${esc(S.update.version)} 업데이트`
+            }</button>`
+          : ''
+      }
       ${
         S.account
           ? `<div class="me">${avatar(S.account)}<div class="who"><b>${esc(S.account.name || S.account.email.split('@')[0])}</b><span>${esc(S.account.email)}</span></div></div>`
@@ -535,6 +559,53 @@ function viewSettings() {
       }
     </section>
 
+    <section class="card"><h2>${icon('lock', 16)}보안 · 개인정보</h2>
+      ${field(
+        '데이터 암호화',
+        s.security.canEncrypt
+          ? `저장 파일을 OS 키체인(Windows DPAPI · macOS 키체인)으로 암호화해요. 지금: <b style="color:${S.encrypted ? 'var(--ok)' : 'var(--warn)'}">${S.encrypted ? '암호화됨' : '평문'}</b>`
+          : '이 기기는 OS 키체인을 쓸 수 없어 평문으로 저장해요 (파일 권한은 내 계정만)',
+        sw('security.encryptData', s.security.encryptData !== false)
+      )}
+      ${field(
+        '앱 PIN',
+        s.security.hasPin ? '설정됨 — 켤 때, 자리 비움·화면 잠금 뒤 PIN 으로 열어요' : '설정하면 자리 비움·화면 잠금 뒤 앱이 잠겨요',
+        `<div class="inline"><input class="input" id="new-pin" type="password" inputmode="numeric" maxlength="8" placeholder="숫자 4~8자리" style="max-width:180px" /><button class="btn" data-act="set-pin">${s.security.hasPin ? '바꾸기' : '설정'}</button>${
+          s.security.hasPin ? `<button class="btn ghost" data-act="clear-pin">끄기</button><button class="btn ghost" data-act="lock-now">지금 잠그기</button>` : ''
+        }</div>`
+      )}
+      ${field('자리 비움 잠금', 'PIN 이 있을 때만 동작. 0 = 끔', `<div class="inline"><input class="input" type="number" min="0" max="240" data-set="security.idleLockMinutes" value="${s.security.idleLockMinutes}" style="max-width:110px" /><span class="muted small">분</span></div>`)}
+      ${field('화면 잠금·절전 시 잠금', '', sw('security.lockOnScreenLock', s.security.lockOnScreenLock))}
+      ${field('화면 공유·캡처에서 숨기기', '줌·디스코드 화면 공유나 캡처 도구에 위젯·앱 창이 찍히지 않아요', sw('security.contentProtection', s.security.contentProtection))}
+      ${field('가리기 모드', `위젯의 일정·할 일 제목을 흐리게 가려요. ${S.platform === 'darwin' ? '⌘⌥P' : 'Ctrl+Alt+P'}`, sw('security.privacyMode', s.security.privacyMode))}
+      ${field(
+        '내 데이터',
+        '백업은 키·토큰을 뺀 JSON. 모두 지우기는 구글 연결을 해제하고 이 기기의 데이터를 삭제해요',
+        `<div class="btn-row"><button class="btn" data-act="export-data">백업 내보내기</button><button class="btn danger" data-act="wipe-data">모두 지우기</button></div>`
+      )}
+    </section>
+
+    <section class="card"><h2>${icon('refresh-cw', 16)}업데이트</h2>
+      ${field(
+        `현재 ${esc(S.version)}`,
+        S.update?.checking
+          ? '확인 중…'
+          : S.update?.error
+            ? `<span style="color:var(--danger)">${esc(S.update.error)}</span>`
+            : S.update?.available
+              ? `<b style="color:var(--accent)">${esc(S.update.version)}</b> 이 나왔어요. 받은 파일은 SHA-256 으로 검증한 뒤 설치해요.`
+              : S.update?.version
+                ? '최신 버전이에요'
+                : '',
+        `<div class="btn-row">${
+          S.update?.available
+            ? `<button class="btn primary" data-act="update-install" ${S.update.downloading != null ? 'disabled' : ''}>${S.update.downloading != null ? `받는 중 ${S.update.downloading}%` : '지금 업데이트'}</button><button class="btn ghost" data-act="update-skip">이 버전 건너뛰기</button>`
+            : `<button class="btn" data-act="update-check">업데이트 확인</button>`
+        }</div>`
+      )}
+      ${field('자동 확인', '6시간마다 확인하고 새 버전이 있으면 알려줘요', sw('updates.autoCheck', s.updates.autoCheck))}
+    </section>
+
     <section class="card"><h2>${icon('bot', 16)}AI 엔진</h2>
       ${field(
         '엔진',
@@ -762,6 +833,38 @@ document.addEventListener('click', async (e) => {
       else toast(`${r.email} 로 로그인했어요`)
       return refresh()
     }
+    case 'set-pin': {
+      const r = await nf.setPin(document.getElementById('new-pin').value)
+      return toast(r.ok ? 'PIN 을 설정했어요' : r.message)
+    }
+    case 'clear-pin':
+      await nf.setPin('')
+      return toast('PIN 을 껐어요')
+    case 'lock-now':
+      return nf.lockNow()
+    case 'export-data': {
+      const r = await nf.exportData()
+      return r.ok && toast('백업을 저장했어요')
+    }
+    case 'wipe-data':
+      if (el.dataset.confirm !== '1') {
+        el.dataset.confirm = '1'
+        el.textContent = '정말 지울까요? 한 번 더 누르기'
+        return
+      }
+      await nf.wipeData()
+      return toast('모두 지웠어요')
+    case 'update-check': {
+      const u = await nf.checkUpdate()
+      return toast(u.error ? u.error : u.available ? `${u.version} 업데이트가 있어요` : '최신 버전이에요')
+    }
+    case 'update-install': {
+      const r = await nf.installUpdate()
+      return r && !r.ok && toast(r.message)
+    }
+    case 'update-skip':
+      await nf.skipUpdate()
+      return toast('이 버전은 알리지 않을게요')
     case 'signout':
       await nf.signOut()
       return refresh()
@@ -865,6 +968,17 @@ document.addEventListener('click', async (e) => {
     case 'del-feed':
       return nf.saveSettings({ feeds: S.settings.feeds.filter((_, i) => i !== Number(d.i)) })
   }
+})
+
+// PIN 해제
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'pin-form') return
+  e.preventDefault()
+  const pin = new FormData(e.target).get('pin')
+  document.activeElement?.blur()
+  const r = await nf.unlock(pin)
+  lockError = r.ok ? '' : r.message
+  refresh()
 })
 
 // 잠금 화면: 간편 모드

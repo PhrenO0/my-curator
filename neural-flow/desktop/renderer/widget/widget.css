@@ -579,3 +579,19 @@ body.edit .card {
   font-weight: 700;
   font-size: 12.5px;
 }
+
+/* 가리기 모드: 제목·내용을 흐리게 (시계·달력 숫자는 그대로) */
+body.privacy .one-text,
+body.privacy .one-why,
+body.privacy .holy,
+body.privacy .ag .title,
+body.privacy .chip .t,
+body.privacy .news,
+body.privacy .summary {
+  filter: blur(6px);
+  transition: filter 0.2s;
+}
+body.privacy .card:hover .one-text,
+body.privacy .card:hover .ag .title {
+  filter: none;
+}
