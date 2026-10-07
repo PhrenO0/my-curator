@@ -119,10 +119,10 @@ ${rhythmDoc(c) ? `[리듬 문서]\n${rhythmDoc(c)}\n` : ''}[지켜야 하는 시
 ${agendaText(occ, today)}
 [자동 점검] ${t.map((x) => x.text).join(' / ') || '특이사항 없음'}
 [질문] ${question}
-JSON: {"answer": "3~6문장", "actions": ["바로 할 행동 1~3개"]}`
+JSON: {"answer": "3~6문장", "actions": ["바로 할 행동 1~3개"], "facts": ["직접 확인한 사실 (출처 URL 포함)"]}`
     try {
-      const r = await callJson(llm, prompt, { temperature: 0.5 })
-      if (r && r.answer) return { answer: String(r.answer), actions: (r.actions || []).map(String).slice(0, 3), source: llm.provider || 'llm', tips: t }
+      const r = await callJson(llm, prompt, { temperature: 0.5, web: true })
+      if (r && r.answer) return { answer: String(r.answer), actions: (r.actions || []).map(String).slice(0, 3), facts: (r.facts || []).map(String).slice(0, 5), source: llm.provider || 'llm', tips: t }
     } catch (e) {
       return { answer: fallbackAnswer(t), actions: [], source: 'rules', error: e.message, tips: t }
     }
@@ -182,15 +182,16 @@ async function evaluate(item, { occ = [], deadlines = [], coach = {}, profile = 
 ${rhythmDoc(c) ? `[리듬 문서]\n${rhythmDoc(c)}\n` : ''}[자동 점검] ${fit.notes.join(' / ')} / 체력 ${fit.energy}
 [주변 일정]
 ${agendaText(occ, A.addDays(item.date, -1))}
-JSON: {"verdict":"추천|선택|비추천","energy":"여유|보통|빡빡","strategy":"인생·커리어 전략상 의미 2문장 (목표와 연결되는지)","advice":"참석 여부와 준비/조정 방법 2문장"}`
+JSON: {"verdict":"추천|선택|비추천","energy":"여유|보통|빡빡","strategy":"인생·커리어 전략상 의미 2문장 (목표와 연결되는지)","advice":"참석 여부와 준비/조정 방법 2문장","facts":["직접 확인한 사실 (출처 URL 포함), 주변 일정 중 마감이 불분명한 것의 실제 마감 포함"]}`
   try {
-    const r = await callJson(llm, prompt, { temperature: 0.4 })
+    const r = await callJson(llm, prompt, { temperature: 0.4, web: true })
     return {
       ...base,
       verdict: ['추천', '선택', '비추천'].includes(r.verdict) ? r.verdict : base.verdict,
       energy: ['여유', '보통', '빡빡'].includes(r.energy) ? r.energy : base.energy,
       strategy: String(r.strategy || ''),
       advice: String(r.advice || base.advice),
+      facts: (r.facts || []).map(String).slice(0, 5),
       source: llm.provider || 'llm',
     }
   } catch (e) {

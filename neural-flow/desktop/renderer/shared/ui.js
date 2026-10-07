@@ -51,6 +51,7 @@
       <ul>${(ev.notes || []).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
       ${ev.strategy ? `<p><b>전략</b> ${esc(ev.strategy)}</p>` : ''}
       ${ev.advice ? `<p><b>조언</b> ${esc(ev.advice)}</p>` : ''}
+      ${ev.facts?.length ? `<p><b>확인한 사실</b></p><ul>${ev.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
     </div>`
   }
 

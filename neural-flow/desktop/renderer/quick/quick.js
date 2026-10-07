@@ -73,7 +73,8 @@ async function askCoach(text) {
     const r = await nf.askCoach(text)
     if (!r) throw new Error('지금은 답할 수 없어요. 잠시 뒤 다시 물어보세요.')
     $body.innerHTML = `<div class="answer"><p>${esc(r.answer)}</p>
-      ${r.actions?.length ? `<ul>${r.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}</div>
+      ${r.actions?.length ? `<ul>${r.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+      ${r.facts?.length ? `<p><b>확인한 사실</b></p><ul>${r.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}</div>
       <div class="foot"><span>${r.source === 'rules' ? '규칙 점검' : r.source === 'claude' ? 'Claude Code' : 'Gemini'}${r.error ? ` · AI 실패: ${esc(r.error.slice(0, 60))}` : ''}</span><span><kbd>Esc</kbd>닫기</span></div>`
   } catch (e) {
     $body.innerHTML = `<div class="msg">${esc(e.message)}</div>`

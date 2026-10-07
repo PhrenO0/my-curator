@@ -267,7 +267,7 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     check('코치 질문(Claude Code)', r?.source === 'claude' && r.answer.startsWith('CLAUDE 코치') && r.actions.length === 1, JSON.stringify(r)?.slice(0, 120))
     s = await snap()
     item = await js(`nf.previewInput(${JSON.stringify('[클럽] 설명회 안내\n10/12(월) 저녁 8시 무료 설명회\n신청하세요')})`)
-    check('공문 → 일정 + 평가(Claude Code)', item.announcement && item.title === 'CLAUDE: AI 설명회' && item.start === '20:00' && item.eval?.verdict === '추천' && item.eval.strategy.startsWith('CLAUDE 전략'), JSON.stringify(item)?.slice(0, 160))
+    check('공문 → 일정 + 평가(Claude Code)', item.announcement && item.title === 'CLAUDE: AI 설명회' && item.start === '20:00' && item.eval?.verdict === '추천' && item.eval.strategy.startsWith('CLAUDE 전략') && item.eval.facts[0] === 'WEB 확인', JSON.stringify(item)?.slice(0, 160))
     check('코치 팁 스냅샷', Array.isArray(s.coachTips) && s.settings.coach?.enabled === true)
     check('Claude Code 브리핑', s.brief?.source === 'claude' && s.brief.one_thing.startsWith('CLAUDE:'), s.brief?.one_thing)
     await js("nf.saveSettings({ engine: 'auto' })")
