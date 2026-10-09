@@ -369,11 +369,21 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
       rawFile.slice(0, 6)
     )
 
+    const qw = getQuick()
+    if (qw && !qw.isDestroyed()) {
+      qw.show()
+      await qw.webContents.executeJavaScript("document.getElementById('q').value = '남은 글자'; document.getElementById('q').dispatchEvent(new Event('input')); 1")
+      await wait(200)
+      qw.hide()
+      await wait(200)
+    }
     // ── 업데이트: 확인 → 받기 → SHA-256 검증 (설치는 건너뜀) ──
     const u = await js('nf.checkUpdate()')
     if (process.platform === 'linux') {
       // 리눅스용 설치 파일은 배포하지 않는다 → 새 버전은 보이지만 설치 대상은 없음
       check('업데이트 확인 (리눅스: 설치 파일 없음)', u.version === '9.9.9' && !u.available && !u.asset)
+      r = await js('nf.installUpdate()')
+      check('숨긴 빠른 입력·잠금 후에도 업데이트가 입력 중으로 막히지 않음', !/입력/.test(r.message || ''), r.message)
     } else {
       check('업데이트 확인', u.available && u.version === '9.9.9' && !!u.asset, `${u.current} → ${u.version}`)
       r = await js('nf.installUpdate()')

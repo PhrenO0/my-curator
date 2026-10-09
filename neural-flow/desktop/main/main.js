@@ -490,6 +490,11 @@ function toggleQuick() {
     protect(quick)
     quick.loadFile(path.join(ROOT, 'renderer', 'quick', 'index.html'))
     quick.on('blur', () => !TEST_HOOK && quick?.hide())
+    // 숨긴 빠른 입력 창의 남은 글자가 자동 업데이트를 무기한 막지 않게 (다시 입력하면 다시 표시)
+    quick.on('hide', () => {
+      if (!inputDrafts.delete(quick.webContents.id)) return
+      if (!inputDrafts.size && update.pending && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, installing: update.installing })) installUpdate()
+    })
     quick.on('closed', () => (quick = null))
     quick.once('ready-to-show', () => quick.show())
     return
