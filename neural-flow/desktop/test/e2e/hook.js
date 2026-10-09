@@ -291,8 +291,13 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     await js("document.getElementById('modal').close()")
 
     toggleQuick()
-    await wait(1500)
-    const q = getQuick()
+    // 느린 러너에서는 ready-to-show 가 늦다 → 최대 10초까지 기다린다
+    let q = null
+    for (let i = 0; i < 50; i++) {
+      q = getQuick()
+      if (q && !q.isDestroyed() && q.isVisible() && !q.webContents.isLoading()) break
+      await wait(200)
+    }
     check('빠른 입력 창', q && q.isVisible() && (await q.webContents.executeJavaScript('!!document.getElementById("q")')))
     await q.webContents.executeJavaScript("document.getElementById('q').value = '금요일 7시 반 스터디'; document.getElementById('bar').requestSubmit()")
     await wait(1500)
