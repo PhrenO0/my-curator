@@ -100,6 +100,8 @@ function callClaude({ claudeCmd, claudeModel }, prompt, { timeoutMs, web }) {
         reject(new Error(`Claude Code: ${e.message || err.slice(0, 200)}`))
       }
     })
+    // CLI 가 입력을 읽기 전에 끝나면 EPIPE — 결과는 close 에서 처리하므로 무시 (안 막으면 main 프로세스가 죽는다)
+    child.stdin.on('error', () => {})
     child.stdin.end(
       web
         ? `${prompt}\n\n[조사 규칙] 마감일·행사 장소·신청 조건처럼 일정에 없는 사실은 추측하지 말고 WebSearch/WebFetch 로 직접 확인하라. 확인한 사실에는 출처 URL 을 붙이고, 못 찾으면 '확인 못 함'이라고 써라.\n[출력 규칙] 설명 없이 위에서 요구한 JSON 객체 하나만 출력하라.`
