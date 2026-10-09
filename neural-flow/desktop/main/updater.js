@@ -12,6 +12,8 @@ const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
+const { Readable, Transform } = require('stream')
+const { pipeline } = require('stream/promises')
 
 const REPO = process.env.NF_UPDATE_REPO || 'PhrenO0/my-curator'
 const API = process.env.NF_UPDATE_API || 'https://api.github.com'
@@ -51,26 +53,32 @@ async function check(current, { platform, arch } = {}) {
 }
 
 async function download(asset, onProgress = () => {}) {
+  if (!/^[a-f0-9]{64}$/i.test(asset.sha256 || '')) throw new Error('SHA-256 릴리스 기록이 없거나 올바르지 않아 설치하지 않았어요')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-update-'))
   const file = path.join(dir, path.basename(asset.name))
-  const res = await fetch(asset.url, { headers: { 'User-Agent': 'neural-flow-updater' } })
-  if (!res.ok || !res.body) throw new Error(`다운로드 실패 (HTTP ${res.status})`)
-  const hash = crypto.createHash('sha256')
-  const out = fs.createWriteStream(file)
-  let got = 0
-  for await (const chunk of res.body) {
-    hash.update(chunk)
-    out.write(chunk)
-    got += chunk.length
-    onProgress(asset.size ? got / asset.size : 0)
-  }
-  await new Promise((r, j) => out.end((e) => (e ? j(e) : r())))
-  const sha = hash.digest('hex')
-  if (asset.sha256 && asset.sha256 !== sha) {
+  try {
+    const res = await fetch(asset.url, { headers: { 'User-Agent': 'neural-flow-updater' } })
+    if (!res.ok || !res.body) throw new Error(`다운로드 실패 (HTTP ${res.status})`)
+    const hash = crypto.createHash('sha256')
+    let got = 0
+    const progress = new Transform({ transform(chunk, encoding, next) {
+      hash.update(chunk)
+      got += chunk.length
+      onProgress(asset.size ? got / asset.size : 0)
+      next(null, chunk)
+    } })
+    await pipeline(Readable.fromWeb(res.body), progress, fs.createWriteStream(file))
+    const sha = hash.digest('hex')
+    if (asset.sha256.toLowerCase() !== sha) throw new Error('받은 파일의 SHA-256 이 릴리스 기록과 달라요 — 설치하지 않았어요')
+    return { file, sha256: sha, verified: true }
+  } catch (e) {
     fs.rmSync(dir, { recursive: true, force: true })
-    throw new Error('받은 파일의 SHA-256 이 릴리스 기록과 달라요 — 설치하지 않았어요')
+    throw e
   }
-  return { file, sha256: sha, verified: !!asset.sha256 }
+}
+
+function shouldAutoInstall(update, settings, { packaged = false, dirty = false, installing = false } = {}) {
+  return !!(packaged && !dirty && !installing && settings.autoInstall !== false && update.available && update.asset && update.version !== settings.skipVersion)
 }
 
 // 설치 단계는 앱이 꺼진 뒤 진행돼야 하므로 분리된 프로세스로 띄운다
@@ -96,4 +104,4 @@ function install(file, { platform = process.platform, appPath } = {}) {
   throw new Error('이 OS 는 자동 설치를 지원하지 않아요 — 릴리스 페이지에서 받아 주세요')
 }
 
-module.exports = { check, download, install, newer, pickAsset }
+module.exports = { check, download, install, newer, pickAsset, shouldAutoInstall }

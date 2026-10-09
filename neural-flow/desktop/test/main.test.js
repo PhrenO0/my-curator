@@ -156,7 +156,7 @@ END:VCALENDAR`)
 })
 
 // ── 저장소 ───────────────────────────────────────────────────────────────────
-test('Store: state.json 에서 시드 + 새 설정 기본값 병합 + 디스크 저장', () => {
+test('Store: 자동 일정 없이 시작 + 새 설정 기본값 병합 + 직접 일정 디스크 저장', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-store-'))
   const statePath = path.join(dir, 'state.json')
   fs.writeFileSync(
@@ -175,14 +175,10 @@ test('Store: state.json 에서 시드 + 새 설정 기본값 병합 + 디스크 
 
   const s = new Store(dir).load()
   const d = s.get()
-  assert.equal(d.activities.length, 1)
-  const deadline = d.events.find((e) => e.title === '[마감] 제출')
-  assert.equal(deadline.date, '2026-10-01')
-  assert.equal(deadline.start, '09:00')
-  assert.equal(deadline.deadline, true)
-  assert.ok(!d.events.some((e) => e.title === '반복 블록'), '날짜 없는 블록은 건너뜀')
-  assert.equal(d.events.find((e) => e.title === 'QT').repeat, 'daily')
-  assert.equal(d.profile.vision.core_axis, 'x')
+  assert.equal(d.activities.length, 0)
+  assert.equal(d.events.length, 0)
+  assert.equal(d.brief, null)
+  assert.equal(d.settings.engine, 'auto')
 
   // 옛 버전 파일(새 설정 키 없음)도 기본값으로 채워진다
   const saved = JSON.parse(fs.readFileSync(path.join(dir, 'neural-flow.json'), 'utf-8'))
@@ -191,7 +187,7 @@ test('Store: state.json 에서 시드 + 새 설정 기본값 병합 + 디스크 
   fs.writeFileSync(path.join(dir, 'neural-flow.json'), JSON.stringify(saved))
   const s2 = new Store(dir).load()
   assert.equal(s2.get().settings.widget.showCalendar, true)
-  assert.equal(s2.get().settings.schedule.briefTime, '07:00')
+  assert.equal(s2.get().settings.widget.showCoach, false)
 
   let notified = 0
   s2.onChange(() => notified++)
@@ -201,4 +197,30 @@ test('Store: state.json 에서 시드 + 새 설정 기본값 병합 + 디스크 
   const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'neural-flow.json'), 'utf-8'))
   assert.ok(onDisk.events.some((e) => e.title === '새 일정'))
   delete process.env.NF_STATE_JSON
+})
+
+test('캘린더 전환: 직접 쓴 일정은 보존하고 자동 앵커·미승인 제안만 정리한다', () => {
+  const { Store } = require('../main/store.js')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-migration-'))
+  fs.writeFileSync(path.join(dir, 'neural-flow.json'), JSON.stringify({
+    settings: { engine: 'auto', widget: { showCoach: true } },
+    events: [
+      { id: 'manual', title: '내 약속', date: '2026-10-12', note: '직접 입력' },
+      { id: 'anchor', title: '자동 루틴', note: '데일리 앵커 (state.json)' },
+    ],
+    activities: [{ id: 'suggestion', status: '제안됨' }, { id: 'accepted', status: '승인됨' }],
+    account: { email: 'me@example.com' },
+    brief: { one_thing: '자동 선정' },
+  }))
+  const s = new Store(dir).load()
+  assert.deepEqual(s.get().events.map((e) => e.id), ['manual'])
+  assert.deepEqual(s.get().activities.map((a) => a.id), ['accepted'])
+  assert.equal(s.get().account.email, 'me@example.com')
+  assert.equal(s.get().brief, null)
+  assert.equal(s.get().settings.engine, 'auto')
+  // Migration is one-time: a newly entered suggestion is not deleted on later startup.
+  s.update((d) => d.activities.push({ id: 'new-manual', status: '제안됨' }))
+  s.flush()
+  assert.equal(new Store(dir).load().get().activities.length, 2)
+  fs.rmSync(dir, { recursive: true, force: true })
 })

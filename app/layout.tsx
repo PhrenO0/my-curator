@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "🌊 neural-flow",
-  description: "이상적인 삶 운영 대시보드 — 오늘의 단 하나",
+  description: "직접 입력한 일정과 Google 캘린더",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,

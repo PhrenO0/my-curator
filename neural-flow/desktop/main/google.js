@@ -202,7 +202,7 @@ class GoogleClient {
           pageToken = res.nextPageToken || ''
         } while (pageToken)
       } catch (e) {
-        errors.push({ calendar: cal.name, message: e.message })
+        errors.push({ calendar: cal.name, calendarId: cal.id, message: e.message })
       }
     }
     return { events: out, errors }
@@ -212,13 +212,15 @@ class GoogleClient {
   async createEvent(calendarId, ev, timeZone) {
     const body = { summary: ev.title, description: ev.note || undefined, location: ev.location || undefined }
     if (ev.start) {
-      const end = ev.end || addMinutes(ev.start, Number(ev.minutes) || 60)
+      const end = ev.end ? { time: ev.end, day: ev.end <= ev.start ? 1 : 0 } : addMinutes(ev.start, Number(ev.minutes) || 60)
       body.start = { dateTime: `${ev.date}T${ev.start}:00`, timeZone }
       body.end = { dateTime: `${end.day ? A.addDays(ev.date, 1) : ev.date}T${end.time || end}:00`, timeZone }
     } else {
       body.start = { date: ev.date }
       body.end = { date: A.addDays(ev.date, 1) }
     }
+    const recurrence = { daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' }[ev.repeat]
+    if (recurrence) body.recurrence = [`RRULE:${recurrence}`]
     return this.api(`/calendars/${encodeURIComponent(calendarId || 'primary')}/events`, { method: 'POST', body })
   }
 

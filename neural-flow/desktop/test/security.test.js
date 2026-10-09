@@ -118,7 +118,9 @@ test('업데이트 확인 → 다운로드 → SHA-256 검증 (틀리면 거부)
     assert.equal(fs.readFileSync(got.file, 'utf8'), 'fake installer bytes')
     assert.equal(last, 1)
 
-    await assert.rejects(up.download({ ...r.asset, sha256: 'deadbeef' }), /SHA-256/)
+    await assert.rejects(up.download({ ...r.asset, sha256: '0'.repeat(64) }), /SHA-256/)
+    await assert.rejects(up.download({ ...r.asset, sha256: '' }), /SHA-256/)
+    fs.rmSync(path.dirname(got.file), { recursive: true, force: true })
   } finally {
     server.close()
     delete process.env.NF_UPDATE_API

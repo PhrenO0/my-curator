@@ -40,6 +40,12 @@ jobs:
 
       - run: npm ci
 
+      - name: Validate before release
+        run: |
+          npm run check
+          npm test
+          npm run test:e2e
+
       # GitHub 비밀값 NF_GOOGLE_CLIENT_ID / NF_GOOGLE_CLIENT_SECRET 이 있으면 설치 파일에 구워 넣는다
       # → 기기마다 클라이언트 ID 를 붙여넣지 않고 'Google 로그인' 버튼만 누르면 된다
       - name: Bake Google OAuth client

@@ -16,8 +16,8 @@ test('규칙 파서: 날짜·시각·기간·종류', () => {
     ['다음주 수요일 저녁 7시 반 스터디', { kind: 'event', title: '스터디', date: '2026-10-14', start: '19:30' }],
     ['금요일 운동', { kind: 'event', title: '운동', date: '2026-10-09', start: null }],
     ['모레 오전 10시에 치과', { kind: 'event', title: '치과', date: '2026-10-08', start: '10:00' }],
-    ['3시 미팅', { kind: 'event', title: '미팅', date: TODAY, start: '15:00' }],
-    ['오전 9시 QT', { kind: 'event', title: 'QT', date: TODAY, start: '09:00' }],
+    ['3시 미팅', { kind: 'event', title: '미팅', date: null, start: '15:00' }],
+    ['오전 9시 QT', { kind: 'event', title: 'QT', date: null, start: '09:00' }],
     ['10/20 제출', { kind: 'event', title: '제출', date: '2026-10-20' }],
     ['1월 3일 신년 계획', { kind: 'event', title: '신년 계획', date: '2027-01-03' }], // 지난 날짜 → 내년
     ['포트폴리오 케이스 정리', { kind: 'task', title: '포트폴리오 케이스 정리', date: null }],
@@ -74,6 +74,11 @@ test('GoogleClient: 이벤트 생성 바디(시간/종일/자정 넘김) + 401 �
   assert.deepEqual(bodies[1].start, { date: '2026-10-09' })
   assert.deepEqual(bodies[1].end, { date: '2026-10-10' })
   assert.equal(bodies[2].end.dateTime, '2026-10-10T00:30:00')
+
+  await gc.createEvent('primary', { title: '직접 쓴 야간 반복', date: '2026-10-09', start: '23:00', end: '01:00', note: '내 메모', repeat: 'weekly' }, 'Asia/Seoul')
+  assert.equal(bodies[3].description, '내 메모')
+  assert.equal(bodies[3].end.dateTime, '2026-10-10T01:00:00')
+  assert.deepEqual(bodies[3].recurrence, ['RRULE:FREQ=WEEKLY'])
 
   const bad = new GC({ accessToken: 'nope', expiresAt: Date.now() + 3600e3 })
   await assert.rejects(bad.createEvent('primary', { title: 'x', date: '2026-10-09' }, 'UTC'), /Invalid Credentials/)

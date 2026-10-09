@@ -40,6 +40,7 @@ const child = spawn(bin, args, {
     NF_GOOGLE_CALENDAR: `http://127.0.0.1:${port}/calendar/v3`,
     NF_TEST_OPEN_URL: 'fetch', // 브라우저 대신 앱이 직접 로그인 URL 을 연다
     // 가짜 Claude Code CLI
+    NF_CODEX_CMD: `"${process.execPath}" "${path.join(__dirname, 'fake-codex.js')}"`,
     NF_CLAUDE_CMD: `"${process.execPath}" "${path.join(__dirname, 'fake-claude.js')}"`,
     GOOGLE_API_KEY: '', // 개발자 PC 의 실제 키가 섞이지 않게
   },

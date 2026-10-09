@@ -162,3 +162,7 @@ body {
 .answer li {
   margin: 2px 0;
 }
+
+/* Keep the save action reachable in the fixed-height quick window. */
+.body { max-height: 320px; overflow-y: auto; }
+.body .input-review { max-height: 220px; }
