@@ -345,6 +345,8 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     await js('nf.lockNow()')
     s = await snap()
     const lockedWrite = await js("nf.saveEvent({ title: 'x', date: '2026-01-01' }).then(() => 'ok', (e) => e.message)")
+    const draftOff = await js("nf.setInputActive(false).then(() => 'ok', (e) => e.message)")
+    check('잠금 중에도 입력 종료 알림 수신 (업데이트가 막히지 않게)', draftOff === 'ok', draftOff)
     check('지금 잠그기 → 개인 데이터 숨김 + 쓰기 거부', s.locked && s.sessionLocked && !s.needsLogin && s.events === undefined && /로그인이 필요/.test(lockedWrite))
     check('PIN 잠금 화면', /PIN 을 입력하세요/.test(await js('document.body.innerText')))
     await cap(m, 'pin-lock.png')
