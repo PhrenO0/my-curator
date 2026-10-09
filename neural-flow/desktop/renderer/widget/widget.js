@@ -27,7 +27,7 @@ async function refresh() {
 function clockCard() {
   const now = new Date()
   const dls = A.deadlines({ events: S.events, activities: S.activities }, S.today).filter((d) => d.d >= 0).slice(0, 3)
-  const spinning = S.busy.brief || S.busy.news || S.busy.english
+  const spinning = S.busy.calendar
   return `
   <section class="card">
     <div class="clock">
@@ -37,7 +37,7 @@ function clockCard() {
       </div>
       <div class="clock-tools">
         <button class="icon-btn" data-act="quick" title="빠른 입력 (${S.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space'})">${icon('plus', 16)}</button>
-        <button class="icon-btn" data-act="refresh" title="브리핑 새로고침">${icon('refresh-cw', 15, spinning ? 'spin' : '')}</button>
+        <button class="icon-btn" data-act="refresh" title="캘린더 새로고침">${icon('refresh-cw', 15, spinning ? 'spin' : '')}</button>
         <button class="icon-btn" data-act="open" data-view="today" title="관리 창 열기">${icon('settings', 15)}</button>
       </div>
     </div>
@@ -51,44 +51,6 @@ function clockCard() {
             .join('')}</div>`
         : ''
     }
-  </section>`
-}
-
-// 코치: 일정을 보고 먼저 건네는 말 (규칙 기반, 매 갱신마다)
-function coachCard() {
-  const t = S.coachTips || []
-  if (!t.length) return ''
-  const ic = { warn: 'flag', info: 'clock', good: 'sparkles' }
-  return `
-  <section class="card coach">
-    <div class="card-h">${icon('bot', 13)}<span class="grow">코치</span><button class="link-btn" data-act="ask">물어보기</button></div>
-    ${t
-      .slice(0, 3)
-      .map((x) => `<div class="tip ${x.level}">${icon(ic[x.level] || 'clock', 13)}<span>${esc(x.text)}</span></div>`)
-      .join('')}
-  </section>`
-}
-
-function oneThingCard() {
-  const b = S.brief && S.brief.date === S.today ? S.brief : null
-  if (!b) {
-    return `
-    <section class="card">
-      <div class="card-h">${icon('sunrise', 13)}<span>오늘의 단 하나</span></div>
-      <div class="empty">${S.busy.brief ? '브리핑을 만드는 중…' : `아직 오늘 브리핑이 없어요. <button class="link-btn" data-act="brief">지금 만들기</button>`}</div>
-    </section>`
-  }
-  return `
-  <section class="card">
-    <div class="card-h">${icon('target', 13)}<span class="grow">오늘의 단 하나</span>${b.source === 'fallback' ? '<span title="AI 엔진 없음 → 규칙 기반">자동 선정</span>' : ''}</div>
-    <div class="one">
-      <button class="check ${b.done ? 'on' : ''}" data-act="one" aria-label="완료 표시">${icon('check', 14)}</button>
-      <div>
-        <div class="one-text ${b.done ? 'done' : ''}">${esc(b.one_thing)}</div>
-        ${b.one_thing_why ? `<div class="one-why">${esc(b.one_thing_why)}</div>` : ''}
-      </div>
-    </div>
-    ${b.holiness_line ? `<div class="holy">${icon('sparkles', 13)}<span>${esc(b.holiness_line)}</span></div>` : ''}
   </section>`
 }
 
@@ -156,59 +118,6 @@ function agendaBody(items) {
   </div>`
 }
 
-function briefingCard() {
-  const w = S.settings.widget
-  const tabs = []
-  if (w.showEnglish) tabs.push(['english', 'English', 'languages'])
-  if (w.showNews) tabs.push(['news', '뉴스', 'newspaper'])
-  if (!tabs.length) return ''
-  if (!tabs.some((t) => t[0] === tab)) tab = tabs[0][0]
-  const seg = `<div class="seg">${tabs
-    .map(([k, l, ic]) => `<button class="${k === tab ? 'on' : ''}" data-act="tab" data-tab="${k}">${icon(ic, 12)}${l}</button>`)
-    .join('')}</div>`
-  return `
-  <section class="card">
-    <div class="card-h"><span class="grow">${seg}</span>
-      <button class="icon-btn" data-act="open" data-view="brief" title="브리핑 전체 보기">${icon('external-link', 13)}</button>
-    </div>
-    ${tab === 'english' ? englishBody() : newsBody()}
-  </section>`
-}
-
-function englishBody() {
-  const e = S.english
-  if (!e) return `<div class="empty">${S.busy.english ? '오늘의 표현을 고르는 중…' : '아직 오늘의 표현이 없어요.'}</div>`
-  return `
-    <div class="en-expr">
-      <div class="e">${esc(e.expression)}</div>
-      <button class="icon-btn" data-act="say" data-text="${esc(e.expression)}" aria-label="발음 듣기">${icon('volume-2', 15)}</button>
-    </div>
-    <div class="en-mean">${esc(e.meaning)}</div>
-    <div class="dialog">${(e.dialogue || [])
-      .slice(0, 2)
-      .map(
-        (l) => `
-      <div class="line"><span class="who">${esc(l.speaker)}</span>
-        <div><div class="en">${esc(l.en)}</div><div class="ko">${esc(l.ko)}</div></div>
-        <button class="icon-btn play" data-act="say" data-text="${esc(l.en)}" aria-label="듣기">${icon('volume-2', 12)}</button>
-      </div>`
-      )
-      .join('')}</div>`
-}
-
-function newsBody() {
-  const n = S.news || {}
-  const items = (n.items || []).slice(0, 5)
-  if (!items.length) return `<div class="empty">${S.busy.news ? '최신 정보를 모으는 중…' : '뉴스가 아직 없어요.'}</div>`
-  const sum = n.summary?.bullets?.length ? `<div class="summary">${esc(n.summary.bullets[0])}</div>` : ''
-  return `${sum}<ul class="news">${items
-    .map(
-      (i) =>
-        `<li><a href="#" data-act="link" data-url="${esc(i.link)}"><span class="nt">${esc(i.title)}</span><span class="ns">${esc(i.source)} · ${timeAgo(i.date)}</span></a></li>`
-    )
-    .join('')}</ul>`
-}
-
 function editBar() {
   if (S.widgetMode !== 'edit') return ''
   return `<div class="edit-bar">${icon('move', 14)}<span>드래그해서 위치를 옮기세요</span><button data-act="pin">${icon('pin', 12)} 고정</button></div>`
@@ -241,10 +150,8 @@ function render() {
   root.innerHTML =
     editBar() +
     clockCard() +
-    (sec.showOneThing !== false ? oneThingCard() : '') +
-    (sec.showCoach !== false ? coachCard() : '') +
-    (sec.showCalendar !== false ? calendarCard(occ, dayItems) : '') +
-    briefingCard()
+    (sec.showCalendar !== false ? calendarCard(occ, dayItems) : '')
+
 }
 
 // ── 상호작용 ─────────────────────────────────────────────────────────────────
@@ -253,14 +160,10 @@ root.addEventListener('click', async (e) => {
   if (!el) return
   e.preventDefault()
   const act = el.dataset.act
-  if (act === 'one') return nf.toggleOneThing()
-  if (act === 'ask') return nf.openQuick()
   if (act === 'quick') return nf.openQuick()
   if (act === 'occ') return nf.toggleOccurrence(el.dataset.key)
-  if (act === 'brief') return nf.run('brief')
   if (act === 'refresh') {
-    nf.run('brief').then(() => nf.run('english'))
-    return nf.run('news')
+    return nf.run('calendar')
   }
   if (act === 'open') return nf.open(el.dataset.view)
   if (act === 'link') return nf.openLink(el.dataset.url)

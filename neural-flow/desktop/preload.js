@@ -29,11 +29,12 @@ contextBridge.exposeInMainWorld('nf', {
   // 언제든 입력
   previewInput: call('nf:input:preview'),
   commitInput: call('nf:input:commit'),
-  askCoach: call('nf:coach:ask'),
   hideQuick: call('nf:quick:hide'),
   openQuick: call('nf:quick:open'),
   deleteGoogleEvent: call('nf:google:delete'),
   detectEngine: call('nf:engine:detect'),
+  reviewSchedule: call('nf:coach:review'),
+  setInputActive: call('nf:input:active'),
   // 보안 · 개인정보
   unlock: call('nf:security:unlock'),
   setPin: call('nf:security:set-pin'),

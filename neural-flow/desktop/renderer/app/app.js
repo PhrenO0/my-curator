@@ -24,8 +24,6 @@ const REPEATS = [
 const NAV = [
   ['today', '오늘', 'sun'],
   ['calendar', '캘린더', 'calendar-days'],
-  ['board', '활동 보드', 'square-kanban'],
-  ['brief', '브리핑', 'newspaper'],
   ['settings', '설정', 'settings'],
 ]
 
@@ -73,7 +71,7 @@ function occ(from, to) {
   return A.occurrences({ events: S.events, remote: S.remote.events || [], activities: S.activities, doneMap: S.doneMap }, from, to)
 }
 
-const ENGINE_LABEL = { claude: 'AI · Claude Code', gemini: 'AI · Gemini', none: 'AI 꺼짐 (규칙 모드)' }
+const ENGINE_LABEL = { codex: 'ChatGPT · Codex', claude: 'AI · Claude Code', gemini: 'AI · Gemini', none: 'AI 꺼짐 (규칙 모드)' }
 const avatar = (a) =>
   a.picture
     ? `<img class="avatar" src="${esc(a.picture)}" alt="" referrerpolicy="no-referrer" />`
@@ -161,32 +159,56 @@ function describe(item) {
 }
 function renderAskPreview() {
   if (!askItem) return ($askPreview.innerHTML = '')
-  const [ic, label] = KIND[askItem.kind] || KIND.task
-  $askPreview.innerHTML = `<div class="preview">
-    <span class="kind">${icon(ic, 20)}</span>
-    <div class="what"><b>${esc(askItem.title)}</b><span>${esc(label)} · ${esc(describe(askItem))}${askItem.source && askItem.source !== 'rules' ? ' · AI 해석' : ''}</span></div>
+  $askPreview.innerHTML = NFInputReview.render(askItem, S.account) + `<div class="btn-row">
     <button class="btn sm" data-act="ask-cancel">취소</button>
-    <button class="btn sm primary" data-act="ask-commit">${icon('corner-down-left', 14)}추가</button>
-  </div>`
-    + (askItem.eval ? UI.evalCard(askItem.eval) : '')
+    <button class="btn sm primary" data-act="ask-commit">확인한 내용 저장</button></div>`
+
 }
 let askPasted = null
+let askBusy = false
 async function askSubmit() {
+  if (askBusy) return
   const shown = $askInput.value.trim()
   const text = askPasted && shown.startsWith('📄') ? askPasted : shown
   if (!text) return
+  reportDraft()
   if (askItem && askItem._text === text) return askCommit()
-  askItem = { ...(await nf.previewInput(text)), _text: text }
-  renderAskPreview()
+  askBusy = true
+  try {
+    const result = await nf.previewInput(text)
+    if (!result) throw new Error('일정 해석을 완료하지 못했어요. 다시 시도해 주세요')
+    askItem = { ...result, _text: text }
+    renderAskPreview()
+    reportDraft()
+  } catch (e) { toast(e.message) } finally { askBusy = false }
 }
+function reportDraft() {
+  nf.setInputActive?.(!!($askInput.value.trim() || askItem || $modal.open || coachQuestion.trim() || document.querySelector('#key')?.value)).catch(() => {})
+}
+$modal.addEventListener('close', reportDraft)
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'coach-question') coachQuestion = e.target.value
+  reportDraft()
+})
+
 async function askCommit() {
-  if (!askItem) return
-  const r = await nf.commitInput(askItem)
-  toast(r?.message || '추가했어요')
-  askItem = null
-  askPasted = null
-  $askInput.value = ''
-  renderAskPreview()
+  if (!askItem || askBusy) return
+  NFInputReview.read($askPreview, askItem)
+  askBusy = true
+  try {
+    const r = await nf.commitInput(askItem)
+    toast(r?.message || '저장을 완료하지 못했어요')
+    if (!r?.ok) {
+      if (r?.remaining?.length) askItem = { ...askItem, kind: 'batch', items: r.remaining }
+      renderAskPreview()
+      return
+    }
+    askItem = null
+    askPasted = null
+    $askInput.value = ''
+    renderAskPreview()
+    reportDraft()
+  } catch (e) { toast(e.message) } finally { askBusy = false }
 }
 // 여러 줄 공문 붙여넣기 → 원문 전체를 해석·평가
 $askInput.addEventListener('paste', (e) => {
@@ -195,7 +217,7 @@ $askInput.addEventListener('paste', (e) => {
   e.preventDefault()
   askPasted = t
   $askInput.value = `📄 ${t.trim().split(/\r?\n/)[0].slice(0, 40)}… (공문)`
-  $askPreview.innerHTML = '<div class="muted small">공문을 읽고 평가하는 중…</div>'
+  $askPreview.innerHTML = '<div class="muted small">일정 정보를 읽는 중…</div>'
   askSubmit()
 })
 $ask.addEventListener('submit', (e) => {
@@ -207,6 +229,7 @@ $askInput.addEventListener('keydown', (e) => {
     askItem = null
     $askInput.value = ''
     renderAskPreview()
+    reportDraft()
   }
 })
 
@@ -223,7 +246,6 @@ function renderSide() {
         `<button class="nav ${route === r ? 'on' : ''}" data-go="${r}">${icon(ic, 16)}<span>${l}</span><span class="count">${counts[r] || ''}</span></button>`
     ).join('')}
     <div class="side-foot">
-      <div class="status"><span class="dot ${k.provider !== 'none' ? 'ok' : 'warn'}"></span>${ENGINE_LABEL[k.provider] || '규칙 모드'}</div>
       <div class="status"><span class="dot ${S.account ? 'ok' : ''}"></span>${
         S.account ? `구글 캘린더 · ${timeAgo(S.remote.fetchedAt) || '동기화 대기'}` : k.icsUrls?.length ? 'iCal 주소로 읽는 중' : '구글 캘린더 미연결'
       }</div>
@@ -246,101 +268,21 @@ function renderSide() {
 }
 
 // ── 오늘 ────────────────────────────────────────────────────────────────────
+let coachResult = null
+let coachQuestion = ''
 function viewToday() {
-  const b = S.brief && S.brief.date === S.today ? S.brief : null
   const items = occ(S.today, S.today)
-  const dls = A.deadlines({ events: S.events, activities: S.activities }, S.today)
-  const name = S.settings.userName || ''
-  const hist = Object.fromEntries((S.history || []).map((h) => [h.date, h]))
-  const days = Array.from({ length: 7 }, (_, i) => A.addDays(S.today, i - 6))
-
-  const hero = b
-    ? `
-    <section class="hero">
-      <div class="hero-label">${icon('target', 14)}오늘의 단 하나</div>
-      <div class="hero-main">
-        <button class="check ${b.done ? 'on' : ''}" data-act="one" aria-label="완료 표시">${icon('check', 16)}</button>
-        <div>
-          <div class="hero-text ${b.done ? 'done' : ''}">${esc(b.one_thing)}</div>
-          ${b.one_thing_why ? `<div class="hero-why">${esc(b.one_thing_why)}</div>` : ''}
-        </div>
-      </div>
-      <div class="hero-foot">
-        ${
-          b.source === 'gemini' || b.source === 'claude'
-            ? `<span class="badge accent">${icon('sparkles', 11)}${b.source === 'claude' ? 'Claude' : 'Gemini'} 코칭</span>`
-            : b.source === 'manual'
-              ? '<span class="badge">직접 정함</span>'
-              : '<span class="badge">규칙 기반 선정</span>'
-        }
-        ${b.done ? '<span class="badge ok">완료</span>' : ''}
-        <span class="grow"></span>
-        <button class="btn sm ghost" data-act="set-one">${icon('pencil', 13)}직접 정하기</button>
-        <button class="btn sm" data-act="run" data-job="brief" ${S.busy.brief ? 'disabled' : ''}>${icon('refresh-cw', 13, S.busy.brief ? 'spin' : '')}다시 생성</button>
-      </div>
-    </section>`
-    : `
-    <section class="hero">
-      <div class="hero-label">${icon('sunrise', 14)}오늘의 단 하나</div>
-      <div class="hero-text" style="margin-top:12px">${S.busy.brief ? '브리핑을 만드는 중이에요…' : '아직 오늘 브리핑이 없어요'}</div>
-      <div class="hero-foot"><span class="grow"></span>
-        <button class="btn sm ghost" data-act="set-one">${icon('pencil', 13)}직접 정하기</button>
-        <button class="btn sm primary" data-act="run" data-job="brief" ${S.busy.brief ? 'disabled' : ''}>${icon('sparkles', 13)}지금 만들기</button>
-      </div>
-    </section>`
-
-  const mentor = b
-    ? [
-        ['sparkles', '거룩 한 줄', b.holiness_line],
-        ['target', '비어있는 영역 코칭', b.stuck_coaching],
-        ['newspaper', '트렌드 한 줄', b.trend],
-      ]
-        .filter((r) => r[2])
-        .map(([ic, l, t]) => `<div class="row"><span class="ic">${icon(ic, 14)}</span><div><div class="lbl">${l}</div>${esc(t)}</div></div>`)
-        .join('')
-    : ''
-
-  return `
-  <div class="page-h"><div class="titles">
-    <div class="eyebrow">${greetingByHour(new Date().getHours())}${name ? `, ${esc(name)}님` : ''}${b?.greeting ? ` · ${esc(b.greeting)}` : ''}</div>
-    <h1>${A.formatKoreanDate(S.today)}</h1>
-  </div></div>
-  <div class="grid-2">
-    <div class="stack">
-      ${hero}
-      ${mentor ? `<section class="card"><h2>${icon('sun', 14)}멘토 브리핑</h2><div class="rows">${mentor}</div></section>` : ''}
-      <section class="card">
-        <h2><span class="grow">최근 7일 · 단 하나 실행</span><span class="muted small">${days.filter((d) => hist[d]?.done).length}/7</span></h2>
-        <div class="streak">${days
-          .map((d) => {
-            const h = hist[d]
-            const cls = h?.done ? 'done' : h && d < S.today ? 'miss' : ''
-            return `<div title="${esc(h?.one_thing || '')}"><i class="${cls}"></i>${A.WEEKDAYS[A.weekday(d)]}</div>`
-          })
-          .join('')}</div>
-      </section>
-    </div>
-    <div class="stack">
-      <section class="card">
-        <h2><span class="grow">오늘 일정 · ${items.length}</span>
-          <button class="icon-btn" data-act="new-event" data-date="${S.today}" title="일정 추가">${icon('plus', 16)}</button></h2>
-        ${agendaList(items)}
-      </section>
-      <section class="card">
-        <h2>${icon('hourglass', 14)}다가오는 마감</h2>
-        ${
-          dls.length
-            ? dls
-                .map(
-                  (d) =>
-                    `<div class="dl"><span class="d" style="color:${d.d <= 2 ? 'var(--danger)' : 'var(--text)'}">${A.dLabel(d.d)}</span><span class="t">${esc(d.title)}</span><span class="muted small">${d.date.slice(5).replace('-', '/')}</span></div>`
-                )
-                .join('')
-            : `<div class="empty">2주 안에 마감이 없어요. 일정에 'D-day 표시'를 켜면 여기에 나와요.</div>`
-        }
-      </section>
-    </div>
-  </div>`
+  return `<div class="page-h"><div class="titles"><div class="eyebrow">내가 입력한 일정</div><h1>${A.formatKoreanDate(S.today)}</h1></div>
+    <button class="btn" data-act="run" data-job="calendar">${icon('refresh-cw', 14)}동기화</button>
+    <button class="btn primary" data-act="new-event" data-date="${S.today}">${icon('plus', 14)}일정 추가</button></div>
+    <section class="card"><h2>오늘 일정 · ${items.length}</h2>${agendaList(items)}</section>
+    <section class="card"><h2>일정 코칭</h2>
+    <p>일정의 겹침·빠진 정보·준비 시간을 AI와 점검하세요.</p>
+    <input class="input" id="coach-question" value="${esc(coachQuestion)}" placeholder="이번 주 일정을 잘 쓰려면 무엇을 확인해야 할까?" />
+    <button class="btn" data-act="coach-review" ${S.busy.coach ? 'disabled' : ''}>${S.busy.coach ? '검토 중…' : '일정 검토 받기'}</button>
+    <div id="coach-result">${coachResult ? coachResult.ok ? `<p>${esc(coachResult.answer)}</p>${[...(coachResult.observations || []), ...(coachResult.questions || [])].map(x=>`<p>${esc(x)}</p>`).join('')}` : `<p role="alert">${esc(coachResult.message)}</p>` : ''}</div></section>
+    <section class="card"><h2>Google 캘린더</h2><p>${S.account ? '앱에서 저장한 일정은 모바일 Google 캘린더의 같은 계정·캘린더에서 볼 수 있어요. 모바일 변경도 자동으로 새로고침해요.' : '설정에서 Google 계정으로 로그인하면 모바일과 같은 캘린더를 읽고 쓸 수 있어요. iCal은 읽기 전용이에요.'}</p>
+    ${(S.remote.errors || []).map((e) => `<p class="muted">${esc(e.message)}</p>`).join('')}</section>`
 }
 
 function agendaList(items, { editable = true } = {}) {
@@ -397,7 +339,7 @@ function viewCalendar() {
       <button class="icon-btn" data-act="cal-move" data-d="-1" aria-label="이전 달">${icon('chevron-left', 18)}</button>
       <button class="btn sm" data-act="cal-move" data-d="0">오늘</button>
       <button class="icon-btn" data-act="cal-move" data-d="1" aria-label="다음 달">${icon('chevron-right', 18)}</button>
-      ${S.settings.icsUrls?.length ? `<button class="btn sm ghost" data-act="run" data-job="calendar">${icon('refresh-cw', 13, S.busy.calendar ? 'spin' : '')}동기화</button>` : ''}
+      ${S.account || S.settings.icsUrls?.length ? `<button class="btn sm ghost" data-act="run" data-job="calendar">${icon('refresh-cw', 13, S.busy.calendar ? 'spin' : '')}동기화</button>` : ''}
       <button class="btn sm primary" data-act="new-event" data-date="${cal.sel}">${icon('plus', 14)}새 일정</button>
     </div>
   </div>
@@ -412,119 +354,6 @@ function viewCalendar() {
   </div>`
 }
 
-// ── 활동 보드 ───────────────────────────────────────────────────────────────
-function viewBoard() {
-  const list = S.activities.filter((a) => !boardFilter || a.domain === boardFilter)
-  const cols = STATUSES.map((st) => {
-    const cards = list.filter((a) => (a.status || '제안됨') === st)
-    return `<div class="col" data-status="${st}">
-      <div class="col-h">${st}<span class="n">${cards.length}</span></div>
-      <div class="col-list">${cards.map(taskCard).join('')}</div>
-    </div>`
-  }).join('')
-  const used = [...new Set(S.activities.map((a) => a.domain).filter(Boolean))]
-  return `
-  <div class="page-h">
-    <div class="titles"><div class="eyebrow">제안 → 승인 → 예정(캘린더) → 진행 → 완료</div><h1>활동 보드</h1></div>
-    ${(() => {
-      const n = S.activities.filter((a) => a.date && a.date < S.today && !['완료', '보류'].includes(a.status)).length
-      return n ? `<button class="btn sm" data-act="archive-stale" title="날짜가 지난 미완료 활동을 보류로">${icon('hourglass', 13)}지난 활동 ${n}개 정리</button>` : ''
-    })()}
-    <button class="btn sm" data-act="run" data-job="weekly" ${S.busy.brief ? 'disabled' : ''}>${icon('sparkles', 13, S.busy.brief ? 'spin' : '')}주간 추천 받기</button>
-    <button class="btn sm primary" data-act="new-activity">${icon('plus', 14)}활동 추가</button>
-  </div>
-  <div class="filters">
-    <button class="fchip ${!boardFilter ? 'on' : ''}" data-act="filter" data-d="">전체</button>
-    ${used.map((d) => `<button class="fchip ${boardFilter === d ? 'on' : ''}" data-act="filter" data-d="${esc(d)}"><span class="dom" style="--c:${A.domainColor(d)}"><i></i></span>${esc(plainDomain(d))}</button>`).join('')}
-  </div>
-  <div class="board">${cols}</div>
-  <p class="muted small">카드를 끌어서 상태를 바꿔요. 날짜를 정하면 '예정됨'이 되고 캘린더·위젯에 나타나요. AI 추천은 항상 '제안됨'으로만 들어와요 — 승인은 직접.</p>`
-}
-
-function taskCard(a) {
-  const pr = { 높음: 'danger', 중간: 'warn', 낮음: '' }[a.priority] ?? ''
-  const overdue = a.date && a.date < S.today && a.status !== '완료'
-  return `<article class="task" draggable="true" data-id="${a.id}" data-act="edit-activity">
-    <div class="tn">${esc(a.name)}</div>
-    ${a.why ? `<div class="tw">${esc(a.why)}</div>` : ''}
-    <div class="tm">
-      ${a.domain ? `<span class="badge"><span class="dom" style="--c:${A.domainColor(a.domain)}"><i></i></span>${esc(plainDomain(a.domain))}</span>` : ''}
-      ${a.priority ? `<span class="badge ${pr}">${esc(a.priority)}</span>` : ''}
-      ${a.min ? `<span class="badge">${icon('clock', 11)}${a.min}분</span>` : ''}
-      ${a.date ? `<span class="badge ${overdue ? 'danger' : ''}">${icon('calendar-days', 11)}${a.date.slice(5).replace('-', '/')}</span>` : ''}
-    </div>
-  </article>`
-}
-
-// ── 브리핑 ──────────────────────────────────────────────────────────────────
-function viewBrief() {
-  const n = S.news || {}
-  const e = S.english
-  const sum = n.summary
-  const news = `
-  <section class="card">
-    <h2>${icon('newspaper', 14)}<span class="grow">최신 정보</span>
-      <span class="muted small">${n.fetchedAt ? timeAgo(n.fetchedAt) : ''}</span>
-      <button class="icon-btn" data-act="run" data-job="news" title="새로고침">${icon('refresh-cw', 14, S.busy.news ? 'spin' : '')}</button></h2>
-    ${sum?.bullets?.length ? `<ul class="summary">${sum.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}
-    ${sum?.pick?.title ? `<div class="pick">${icon('target', 14)}<div><b>${esc(sum.pick.title)}</b><br>${esc(sum.pick.why || '')}</div></div>` : ''}
-    ${!S.settings.hasKey ? `<p class="muted small" style="margin:0 0 8px">AI 키를 연결하면 3줄 요약과 '오늘 읽을 1개'를 골라줘요.</p>` : ''}
-    ${
-      (n.items || []).length
-        ? `<ul class="news-list">${n.items
-            .slice(0, 20)
-            .map(
-              (i) =>
-                `<li><a href="#" data-act="link" data-url="${esc(i.link)}"><div><div class="nt">${esc(i.title)}</div><div class="ns">${esc(i.source)} · ${timeAgo(i.date)}</div></div></a></li>`
-            )
-            .join('')}</ul>`
-        : `<div class="empty">${S.busy.news ? '모으는 중…' : '아직 수집된 뉴스가 없어요.'}</div>`
-    }
-    ${(n.errors || []).length ? `<p class="muted small">불러오지 못한 피드: ${n.errors.map((x) => esc(x.name)).join(', ')}</p>` : ''}
-  </section>`
-
-  const english = e
-    ? `
-  <section class="card">
-    <h2>${icon('languages', 14)}<span class="grow">오늘의 영어 회화</span>
-      ${e.source === 'gemini' || e.source === 'claude' ? '<span class="badge accent">AI 맞춤</span>' : '<span class="badge">기본 표현집</span>'}
-      <button class="icon-btn" data-act="run" data-job="english" title="다른 표현">${icon('refresh-cw', 14, S.busy.english ? 'spin' : '')}</button></h2>
-    <div class="inline" style="align-items:flex-start">
-      <div style="flex:1"><div class="en-big">${esc(e.expression)}</div>
-      <div class="en-mean">${esc(e.meaning)}</div>
-      ${e.situation ? `<div class="en-sit">${esc(e.situation)}</div>` : ''}</div>
-      <button class="btn sm" data-act="say" data-text="${esc(e.expression)}">${icon('volume-2', 14)}듣기</button>
-    </div>
-    <div class="dialog">${(e.dialogue || [])
-      .map(
-        (l, i) => `<div class="bubble ${i % 2 ? 'b' : ''}"><span class="who">${esc(l.speaker)}</span>
-          <div class="body"><div class="en">${esc(l.en)}</div><div class="ko">${esc(l.ko)}</div></div>
-          <button class="icon-btn" data-act="say" data-text="${esc(l.en)}" aria-label="듣기">${icon('volume-2', 14)}</button></div>`
-      )
-      .join('')}</div>
-    <div class="btn-row" style="margin-top:12px">
-      <button class="btn sm ghost" data-act="say-all">${icon('volume-2', 13)}대화 전체 듣기 (섀도잉)</button>
-    </div>
-    ${e.variations?.length ? `<div style="margin-top:14px"><div class="lbl muted small">비슷한 표현</div>${e.variations.map((v) => `<span class="badge" style="margin:6px 6px 0 0">${esc(v)}</span>`).join('')}</div>` : ''}
-    ${e.tip ? `<div class="tip">${icon('flag', 14)}<div>${esc(e.tip)}</div></div>` : ''}
-  </section>`
-    : `<section class="card"><h2>${icon('languages', 14)}오늘의 영어 회화</h2><div class="empty"><button class="btn sm" data-act="run" data-job="english">표현 받기</button></div></section>`
-
-  const hist = (S.englishHistory || []).slice(0, -1).reverse().slice(0, 10)
-  const past = hist.length
-    ? `<section class="card"><h2>지난 표현 복습</h2><ul class="hist">${hist
-        .map(
-          (h) =>
-            `<li><span class="d">${h.date.slice(5).replace('-', '/')}</span><span class="e">${esc(h.expression)}</span><span class="muted small">${esc(h.meaning)}</span><button class="icon-btn" data-act="say" data-text="${esc(h.expression)}">${icon('volume-2', 13)}</button></li>`
-        )
-        .join('')}</ul></section>`
-    : ''
-
-  return `
-  <div class="page-h"><div class="titles"><div class="eyebrow">최신 정보 + 영어 회화</div><h1>브리핑</h1></div></div>
-  <div class="grid-2"><div class="stack">${news}</div><div class="stack">${english}${past}</div></div>`
-}
-
 // ── 설정 ────────────────────────────────────────────────────────────────────
 function viewSettings() {
   const s = S.settings
@@ -537,7 +366,7 @@ function viewSettings() {
     `<div class="seg">${list.map(([v, l]) => `<button class="${String(v) === String(val) ? 'on' : ''}" data-act="seg" data-set="${key}" data-v="${v}">${l}</button>`).join('')}</div>`
 
   return `
-  <div class="page-h"><div class="titles"><div class="eyebrow">모든 데이터는 이 PC에만 저장돼요</div><h1>설정</h1></div></div>
+  <div class="page-h"><div class="titles"><div class="eyebrow">Google 일정은 로그인한 Google 계정에 저장돼요</div><h1>설정</h1></div></div>
   <div class="settings">
     <section class="card"><h2>${icon('lock', 16)}계정</h2>
       ${field(
@@ -617,38 +446,18 @@ function viewSettings() {
             : `<button class="btn" data-act="update-check">업데이트 확인</button>`
         }</div>`
       )}
+      ${field('자동 설치', S.update?.pending ? '입력 중인 내용을 저장하거나 닫으면 업데이트해요.' : '앱 시작 시 새 버전을 받아 검증하고 설치·재시작해요.', sw('updates.autoInstall', s.updates.autoInstall !== false))}
       ${field('자동 확인', '6시간마다 확인하고 새 버전이 있으면 알려줘요', sw('updates.autoCheck', s.updates.autoCheck))}
     </section>
 
-    <section class="card"><h2>${icon('bot', 16)}AI 엔진</h2>
-      ${field(
-        '엔진',
-        `지금: <b>${esc(ENGINE_LABEL[s.provider] || '')}</b><br>자동 = 노트북에 Claude Code 가 있으면 그것(내 Claude 구독), 없으면 Gemini 키, 둘 다 없으면 규칙.`,
-        seg('engine', s.engine || 'auto', [['auto', '자동'], ['claude', 'Claude Code'], ['gemini', 'Gemini'], ['off', '끄기']])
-      )}
-      ${field(
-        'Claude Code',
-        s.claudeVersion ? `<b style="color:var(--ok)">찾음</b> · ${esc(s.claudeVersion)}` : '못 찾음 — 노트북 터미널에서 <code>claude</code> 설치·로그인 후 [다시 찾기]',
-        `<div class="inline"><input class="input" data-set="claudeCmd" value="${esc(s.claudeCmd || 'claude')}" /><button class="btn" data-act="detect-engine">다시 찾기</button></div>`
-      )}
-      ${field('Claude 모델', '비우면 Claude Code 기본값', `<input class="input" data-set="claudeModel" value="${esc(s.claudeModel || '')}" placeholder="예: sonnet" />`)}
-      ${field(
-        'Gemini API 키',
-        `상태: ${s.hasKey ? `<b style="color:var(--ok)">연결됨</b> (${esc(s.keySource)})` : '<b style="color:var(--warn)">없음</b> — 규칙 기반으로 동작'}<br>기존 neural-flow 의 <code>GOOGLE_API_KEY</code>와 같은 키. OS 키체인으로 암호화해 저장.`,
-        `<div class="inline"><input class="input" id="key" type="password" placeholder="${s.hasKey ? '••••••••  (바꾸려면 새 키 입력)' : 'AIza…'}" autocomplete="off" /><button class="btn" data-act="save-key">저장·테스트</button></div>`
-      )}
-      ${field('모델', '기본 gemini-2.5-flash', `<input class="input" data-set="geminiModel" value="${esc(s.geminiModel)}" />`)}
-      ${field('이름', '브리핑에서 부를 이름', `<input class="input" data-set="userName" value="${esc(s.userName)}" />`)}
-      ${field('영어 수준', '회화 표현 난이도', `<input class="input" data-set="englishLevel" value="${esc(s.englishLevel)}" />`)}
-    </section>
-
-    <section class="card"><h2>${icon('sparkles', 16)}코치</h2>
-      ${field('코칭', '일정을 보고 무리·겹침·쉬는 시간 침범·마감을 위젯에서 먼저 알려줘요. 빠른 입력에서 <code>?</code>로 시작하면 질문.', sw('coach.enabled', s.coach?.enabled !== false))}
-      ${field('하루 일정 상한', '이보다 많으면 미루기를 제안 (분)', `<input class="input" type="number" min="60" max="960" step="30" data-set="coach.dailyLimitMin" value="${s.coach?.dailyLimitMin ?? 480}" style="max-width:120px" />`)}
-      ${field('일정 사이 여유', '이보다 짧으면 알려줘요 (분)', `<input class="input" type="number" min="0" max="120" step="5" data-set="coach.bufferMin" value="${s.coach?.bufferMin ?? 15}" style="max-width:120px" />`)}
-      ${field('쉬는 시간 시작', '이후 일정은 휴식 침범으로 봐요', `<input class="input" type="time" data-set="coach.quietAfter" value="${esc(s.coach?.quietAfter || '23:00')}" style="max-width:140px" />`)}
-      ${field('리듬 문서', '예: exam-study 의 <code>리듬.md</code> 전체 경로. 코치가 시험 모드·주간 루프까지 보고 판단해요.', `<input class="input" data-set="coach.rhythmFile" value="${esc(s.coach?.rhythmFile || '')}" placeholder="C:\\Users\\…\\exam-study\\리듬.md" />`)}
-      ${field('리듬 원칙', 'AI 코치가 답할 때 기준으로 삼아요', `<textarea class="input" data-set="coach.principles">${esc(s.coach?.principles || '')}</textarea>`)}
+    <section class="card"><h2>${icon('bot', 16)}일정·공지 해석</h2>
+      ${field('입력 해석 엔진', `현재: ${esc(ENGINE_LABEL[s.provider] || '규칙 해석')}<br>자동은 ChatGPT 로그인한 Codex → Claude Code 순서예요. 입력·검토할 때 일정 정보를 선택한 AI에 보내요. Gemini API는 별도 과금이에요.`, seg('engine', s.engine || 'auto', [['auto','구독 자동'],['codex','ChatGPT · Codex'],['claude','Claude Code'],['gemini','Gemini API'],['off','규칙만']]))}
+      ${field('ChatGPT · Codex', s.codexStatus?.subscription ? `ChatGPT 로그인 확인 · ${esc(s.codexStatus.version)}` : '이 PC에서 Codex CLI 설치 후 codex login으로 ChatGPT 계정에 로그인하세요.', `<div class="inline"><input class="input" data-set="codexCmd" value="${esc(s.codexCmd || 'codex')}" /><button class="btn" data-act="detect-engine">연결 확인</button></div>`)}
+      ${field('Codex 모델', '비워 두면 구독 기본 모델', `<input class="input" data-set="codexModel" value="${esc(s.codexModel || '')}" />`)}
+      ${field('Claude Code', s.claudeVersion ? `연결됨 · ${esc(s.claudeVersion)}` : '이 PC에 설치하고 로그인한 Claude Code를 사용해요.', `<div class="inline"><input class="input" data-set="claudeCmd" value="${esc(s.claudeCmd || 'claude')}" /><button class="btn" data-act="detect-engine">연결 확인</button></div>`)}
+      ${field('Claude 모델', '비워 두면 기본 모델', `<input class="input" data-set="claudeModel" value="${esc(s.claudeModel || '')}" />`)}
+      ${field('Gemini API 키', s.hasKey ? '키가 설정되어 있어요' : '키를 설정하면 Gemini로 입력을 해석할 수 있어요.', `<div class="inline"><input class="input" id="key" type="password" autocomplete="off" placeholder="새 키 입력" /><button class="btn" data-act="save-key">저장·연결 확인</button></div>`)}
+      ${field('Gemini 모델', '', `<input class="input" data-set="geminiModel" value="${esc(s.geminiModel)}" />`)}
     </section>
 
     <section class="card"><h2>${icon('calendar-days', 16)}iCal 주소 (선택 · 읽기 전용)</h2>
@@ -660,26 +469,10 @@ function viewSettings() {
       )}
     </section>
 
-    <section class="card"><h2>${icon('newspaper', 14)}뉴스 피드 (RSS)</h2>
-      ${(s.feeds || [])
-        .map(
-          (f, i) =>
-            `<div class="feed"><b>${esc(f.name)}</b><span class="fu">${esc(f.url)}</span><button class="icon-btn" data-act="del-feed" data-i="${i}" aria-label="삭제">${icon('trash-2', 14)}</button></div>`
-        )
-        .join('')}
-      <div class="inline" style="margin-top:8px"><input class="input" id="feed-name" placeholder="이름" style="max-width:140px" /><input class="input" id="feed-url" placeholder="RSS 주소 (https://…)" /><button class="btn" data-act="add-feed">${icon('plus', 14)}추가</button></div>
-    </section>
-
     <section class="card"><h2>${icon('pin', 14)}바탕화면 위젯</h2>
       ${field('불투명도', '배경화면이 비치는 정도', `<input type="range" min="0.25" max="0.95" step="0.01" data-set="widget.opacity" value="${w.opacity}" />`)}
       ${field('너비', '300 ~ 520px', `<input class="input" type="number" min="300" max="520" step="10" data-set="widget.width" value="${w.width}" style="max-width:120px" />`)}
       ${field('테마', '관리 창에도 함께 적용', seg('widget.theme', w.theme, [['dark', '다크'], ['light', '라이트'], ['auto', '시스템']]))}
-      ${field('보여줄 카드', '', `<div class="stack" style="gap:10px">
-          <label class="check-line">${sw('widget.showOneThing', w.showOneThing !== false)}오늘의 단 하나</label>
-          <label class="check-line">${sw('widget.showCoach', w.showCoach !== false)}코치</label>
-          <label class="check-line">${sw('widget.showCalendar', w.showCalendar !== false)}달력 + 일정</label>
-          <label class="check-line">${sw('widget.showEnglish', w.showEnglish)}영어 회화</label>
-          <label class="check-line">${sw('widget.showNews', w.showNews)}뉴스</label></div>`)}
       ${field('클릭 통과', '켜면 위젯이 마우스를 무시해요 (순수 배경처럼). 트레이 메뉴에서도 전환.', sw('widget.clickThrough', w.clickThrough))}
       ${field(
         '위치 옮기기',
@@ -688,19 +481,8 @@ function viewSettings() {
       )}
     </section>
 
-    <section class="card"><h2>${icon('clock', 14)}자동 비서 스케줄</h2>
-      ${field('아침 브리핑', '오늘의 단 하나 + 영어 표현 + 알림. PC가 꺼져 있었다면 켜질 때 바로 실행.', `<input class="input" type="time" data-set="schedule.briefTime" value="${sc.briefTime}" style="max-width:140px" />`)}
-      ${field('저녁 체크인', '단 하나를 아직 안 끝냈을 때만 알림', `<input class="input" type="time" data-set="schedule.checkinTime" value="${sc.checkinTime}" style="max-width:140px" />`)}
-      ${field(
-        '주간 추천',
-        '다음 주 활동을 제안됨으로 추가',
-        `<div class="inline"><select class="input" data-set="schedule.weeklyDay" style="max-width:120px">${opt(
-          A.WEEKDAYS.map((d, i) => [String(i), `${d}요일`]),
-          String(sc.weeklyDay)
-        )}</select><input class="input" type="time" data-set="schedule.weeklyTime" value="${sc.weeklyTime}" style="max-width:140px" /></div>`
-      )}
-      ${field('뉴스 새로고침', '시간 간격', `<input class="input" type="number" min="1" max="24" data-set="schedule.newsEveryHours" value="${sc.newsEveryHours}" style="max-width:120px" />`)}
-      ${field('로그인 시 자동 실행', 'PC를 켜면 위젯이 바로 떠요', sw('autoStart', s.autoStart))}
+    <section class="card"><h2>${icon('clock', 14)}앱 시작</h2>
+      ${field('로그인 시 자동 실행', 'PC를 켜면 캘린더 위젯이 떠요', sw('autoStart', s.autoStart))}
     </section>
   </div>`
 }
@@ -709,12 +491,21 @@ function viewSettings() {
 function openModal(html, onSubmit) {
   $modal.innerHTML = html
   $modal.showModal()
+  reportDraft()
   const form = $modal.querySelector('form')
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
     if (e.submitter?.value === 'cancel') return $modal.close()
-    await onSubmit(Object.fromEntries(new FormData(form)), e.submitter?.value)
-    $modal.close()
+    if (form.dataset.saving) return
+    form.dataset.saving = 'true'
+    try {
+      const result = await onSubmit(Object.fromEntries(new FormData(form)), e.submitter?.value)
+      if (result !== false) $modal.close()
+    } catch (err) {
+      toast(err.message)
+    } finally {
+      delete form.dataset.saving
+    }
   })
   form.querySelector('input')?.focus()
 }
@@ -760,8 +551,9 @@ function eventModal(ev) {
       }
       if (f.target === 'google') {
         const mins = f.start && f.end ? toMin(f.end) - toMin(f.start) : 60
-        const r = await nf.commitInput({ kind: 'event', title: f.title, date: f.date, start: f.start || null, minutes: mins > 0 ? mins : 60, target: 'google' })
-        return toast(r?.message || '저장했어요')
+        const r = await nf.commitInput({ kind: 'event', title: f.title, date: f.date, start: f.start || null, end: f.end || null, minutes: mins > 0 ? mins : 60, note: f.note, repeat: f.repeat, location: f.location, target: 'google' })
+        toast(r?.message || '저장했어요')
+        return r?.ok !== false
       }
       await nf.saveEvent({ ...ev, ...f, deadline: f.deadline === 'on' })
       toast('저장했어요')
@@ -822,7 +614,7 @@ function oneThingModal() {
 }
 
 // ── 렌더 & 이벤트 ───────────────────────────────────────────────────────────
-const VIEWS = { today: viewToday, calendar: viewCalendar, board: viewBoard, brief: viewBrief, settings: viewSettings }
+const VIEWS = { today: viewToday, calendar: viewCalendar, settings: viewSettings }
 
 function render() {
   if (!S) return
@@ -899,10 +691,21 @@ document.addEventListener('click', async (e) => {
       return askCommit()
     case 'ask-cancel':
       askItem = null
-      return renderAskPreview()
+      askPasted = null
+      $askInput.value = ''
+      renderAskPreview()
+      reportDraft()
+      return
+    case 'coach-review': {
+      coachResult = await nf.reviewSchedule(coachQuestion)
+      coachQuestion = ''
+      render()
+      reportDraft()
+      return
+    }
     case 'detect-engine': {
       const v = await nf.detectEngine()
-      return toast(v ? `Claude Code 찾음 · ${v}` : 'Claude Code 를 못 찾았어요')
+      return toast(v?.codexStatus?.subscription ? 'ChatGPT 구독 로그인 확인' : v?.claudeVersion ? `Claude Code 찾음 · ${v.claudeVersion}` : 'Codex 또는 Claude Code를 설치하고 로그인해 주세요')
     }
     case 'cal-toggle': {
       const cals = S.remote.calendars || []

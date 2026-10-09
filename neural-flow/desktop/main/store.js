@@ -5,7 +5,6 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
-const { ymd } = require('../renderer/shared/agenda.js')
 
 // 설치 파일로 패키징하면 repo 밖에서 돌기 때문에 NF_STATE_JSON 으로 경로를 지정할 수 있다.
 // 설치 파일 안에서는 resources/state.json (빌드 때 같이 넣음)을 쓴다.
@@ -34,6 +33,8 @@ const DEFAULT_SETTINGS = {
   autoStart: true,
   // LLM 엔진: auto(Claude Code 있으면 그것, 없으면 Gemini 키, 둘 다 없으면 규칙) | claude | gemini | off
   engine: 'auto',
+  codexCmd: 'codex',
+  codexModel: '',
   claudeCmd: 'claude',
   claudeModel: '',
   // 로그인: 허용된 구글 계정만 앱을 열 수 있다
@@ -55,8 +56,8 @@ const DEFAULT_SETTINGS = {
     contentProtection: true, // 화면 공유·캡처에 앱 창이 찍히지 않게
     privacyMode: false, // 위젯 내용 가리기
   },
-  updates: { autoCheck: true, skipVersion: '' },
-  coach: structuredClone(require('./coach.js').DEFAULT_COACH),
+  updates: { autoCheck: true, autoInstall: true, skipVersion: '' },
+  coach: { enabled: false },
   widget: {
     visible: true,
     x: null,
@@ -65,11 +66,11 @@ const DEFAULT_SETTINGS = {
     opacity: 0.72,
     theme: 'auto',
     clickThrough: false,
-    showOneThing: true,
-    showCoach: true,
+    showOneThing: false,
+    showCoach: false,
     showCalendar: true,
-    showNews: true,
-    showEnglish: true,
+    showNews: false,
+    showEnglish: false,
   },
   schedule: {
     briefTime: '07:00',
@@ -90,66 +91,6 @@ function readJson(file) {
   } catch {
     return null
   }
-}
-
-function toDateOnly(raw) {
-  if (!raw) return null
-  const m = String(raw).match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?/)
-  return m ? { date: m[1], time: m[2] || null } : null
-}
-
-// state.json → 앱 데이터로 변환 (비전·영역은 profile, 활동/고정일정/앵커는 events·activities)
-function fromStateJson(state) {
-  const profile = {
-    vision: state.vision || {},
-    goals: state.goals || {},
-    domains: (state.domains || []).map((d) => ({ name: d.name, sub: d.sub || [] })),
-  }
-  const events = []
-  for (const b of state.fixed_blocks || []) {
-    const d = toDateOnly(b.date)
-    if (!d) continue
-    events.push({
-      id: uid(),
-      title: b.title,
-      date: d.date,
-      start: d.time,
-      end: null,
-      domain: '',
-      note: '',
-      repeat: null,
-      deadline: true, // agent.py 의 compute_deadlines 와 동일하게 고정일정은 D-day 대상
-      source: 'local',
-    })
-  }
-  for (const a of state.daily_anchors || []) {
-    const t = String(a.time || '').match(/\d{2}:\d{2}/)
-    events.push({
-      id: uid(),
-      title: a.title,
-      date: ymd(new Date()),
-      start: t ? t[0] : null,
-      end: null,
-      domain: a.domain || '',
-      note: '데일리 앵커 (state.json)',
-      repeat: 'daily',
-      deadline: false,
-      source: 'local',
-    })
-  }
-  const activities = (state.activities || []).map((a) => ({
-    id: uid(),
-    name: a.name,
-    domain: a.domain || '',
-    priority: a.priority || '중간',
-    energy: a.energy || '가벼움',
-    repeat: a.repeat || '1회',
-    min: a.min || null,
-    date: a.date || null,
-    status: a.status || '제안됨',
-    why: a.why || '',
-  }))
-  return { profile, events, activities }
 }
 
 function emptyData() {
@@ -233,12 +174,6 @@ class Store {
       this.data = { ...emptyData(), ...saved, settings: mergeSettings(saved.settings) }
     } else {
       this.data = emptyData()
-      const state = readJson(STATE_JSON)
-      if (state) {
-        const seeded = fromStateJson(state)
-        Object.assign(this.data, seeded)
-        console.log(`[store] state.json에서 활동 ${seeded.activities.length}개 · 일정 ${seeded.events.length}개를 가져옴`)
-      }
       this.flush()
     }
     // 허용 계정 기본값: config.json 의 userEmail (레포 주인)
@@ -247,9 +182,32 @@ class Store {
       const cfg = readJson(CONFIG_JSON)
       if (cfg?.userEmail) g.allowedEmails = [String(cfg.userEmail).toLowerCase()]
     }
-    // 비전·영역은 state.json 이 원본 — 있으면 매 실행마다 최신으로 맞춘다.
-    const state = readJson(STATE_JSON)
-    if (state && state.vision) this.data.profile = fromStateJson(state).profile
+    // Calendar-only migration: remove identifiable generated anchors and suggestions.
+    // Preserve manual events and ambiguous legacy data; never delete Google events.
+    if (this.data.calendarOnlyVersion !== 1) {
+      this.data.events = this.data.events.filter((e) => e.note !== '데일리 앵커 (state.json)' && e.source !== 'generated')
+      this.data.activities = this.data.activities.filter((a) => a.status !== '제안됨' && a.source !== 'generated')
+      this.data.brief = null
+      this.data.english = null
+      this.data.englishHistory = []
+      this.data.news = { fetchedAt: null, items: [], summary: null }
+      this.data.settings.engine = 'off'
+      for (const key of ['showOneThing', 'showCoach', 'showNews', 'showEnglish']) this.data.settings.widget[key] = false
+      this.data.calendarOnlyVersion = 1
+      this.flush()
+    }
+    // Re-enable the input-only engine after the calendar-only transition.
+    if (!this.data.inputEngineVersion) {
+      this.data.settings.engine = 'auto'
+      this.data.inputEngineVersion = 1
+      this.flush()
+    }
+    if (!this.data.autoUpdateVersion) {
+      this.data.settings.updates.autoCheck = true
+      this.data.settings.updates.autoInstall = true
+      this.data.autoUpdateVersion = 1
+      this.flush()
+    }
     return this
   }
 

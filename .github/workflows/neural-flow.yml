@@ -1,11 +1,6 @@
 name: neural-flow mentoring agent
 
 on:
-  schedule:
-    - cron: '0 22 * * *'   # 매일 KST 07:00 — 데일리 브리핑
-    - cron: '0 13 * * *'   # 매일 KST 22:00 — 저녁 양방향 체크인
-    - cron: '0 11 * * 0'   # 일요일 KST 20:00 — 주간 추천+회고
-    - cron: '0 23 * * 3'   # 목요일 KST 08:00 — 기회·정보 레이더(Threads 포함)
   workflow_dispatch:
     inputs:
       mode:

@@ -31,7 +31,7 @@ function parseJson(raw) {
 const providerOf = (llm) => llm?.provider || (llm?.key ? 'gemini' : 'none')
 const ready = (llm) => {
   const p = providerOf(llm)
-  return p === 'claude' || (p === 'gemini' && !!llm.key)
+  return p === 'codex' || p === 'claude' || (p === 'gemini' && !!llm.key)
 }
 
 async function callGemini({ key, model }, prompt, { temperature, timeoutMs }) {
@@ -70,13 +70,18 @@ function callClaude({ claudeCmd, claudeModel }, prompt, { timeoutMs, web }) {
     // 모델 이름은 사용자 입력이라 셸에 넘기기 전에 모양을 검사한다
     const model = /^[\w.:-]+$/.test(claudeModel || '') ? ` --model ${claudeModel}` : ''
     // web: 마감·행사 정보처럼 모르는 사실은 직접 검색하게 (검색·읽기 도구만 허용)
-    const tools = web ? ' --allowedTools WebSearch WebFetch' : ''
+    const tools = web ? ' --allowedTools WebSearch WebFetch' : ' --tools ""'
     const command = `${claudeCmd || 'claude'} -p --output-format json --permission-mode dontAsk${model}${tools}`
-    const child = spawn(command, { cwd: emptyDir(), shell: true, windowsHide: true })
+    const env = { ...process.env }
+    delete env.ANTHROPIC_API_KEY
+    delete env.ANTHROPIC_BASE_URL
+    delete env.ANTHROPIC_AUTH_TOKEN
+    const child = spawn(command, { cwd: emptyDir(), env, shell: true, windowsHide: true, detached: process.platform !== 'win32' })
     let out = ''
     let err = ''
     const timer = setTimeout(() => {
-      child.kill()
+      if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill())
+      else { try { process.kill(-child.pid, 'SIGTERM') } catch { child.kill() } }
       reject(new Error('Claude Code 응답 시간 초과'))
     }, timeoutMs)
     child.stdout.on('data', (d) => (out += d))
@@ -105,6 +110,7 @@ function callClaude({ claudeCmd, claudeModel }, prompt, { timeoutMs, web }) {
 
 async function callJson(llm, prompt, { temperature = 0.4, timeoutMs, web = false } = {}) {
   const p = providerOf(llm)
+  if (p === 'codex') return require('./codex.js').callCodex(llm, prompt, { timeoutMs: timeoutMs || 90000 })
   if (p === 'gemini') return callGemini(llm, prompt, { temperature, timeoutMs: timeoutMs || 45000 })
   if (p === 'claude') return callClaude(llm, prompt, { timeoutMs: timeoutMs || (web ? 240000 : 120000), web })
   throw new Error('LLM 엔진이 꺼져 있어요')
@@ -113,7 +119,7 @@ async function callJson(llm, prompt, { temperature = 0.4, timeoutMs, web = false
 // 노트북에 Claude Code 가 깔려 있고 로그인돼 있는지
 function detectClaude(cmd = 'claude') {
   return new Promise((resolve) => {
-    const child = spawn(`${cmd} --version`, { shell: true, windowsHide: true })
+    const child = spawn(`${cmd} --version`, { shell: true, windowsHide: true, detached: process.platform !== 'win32' })
     let out = ''
     child.stdout.on('data', (d) => (out += d))
     child.on('error', () => resolve(null))

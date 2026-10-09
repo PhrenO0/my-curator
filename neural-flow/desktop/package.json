@@ -1,8 +1,8 @@
 {
   "name": "neural-flow-desktop",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
-  "description": "neural-flow 데스크탑 — 바탕화면 반투명 캘린더 위젯 + 일정 관리 + 브리핑 비서",
+  "description": "neural-flow — 내 일정 · Google 캘린더 · 구독 LLM 일정 코칭",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",

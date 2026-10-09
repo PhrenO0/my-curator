@@ -11,7 +11,7 @@ const KIND = {
   one_thing: ['target', '오늘의 단 하나'],
   note: ['sticky-note', '메모'],
 }
-const EXAMPLES = ['?이번 주 무리 없어?', '내일 오후 3시 커피챗', '금요일 7시 반 스터디 2시간', '!자소서 1문항 끝내기', '포트폴리오 케이스 정리', '메모: 위젯 아이디어']
+const EXAMPLES = ['내일 오후 3시 커피챗', '금요일 7시 반 스터디 2시간', '!자소서 1문항 끝내기', '포트폴리오 케이스 정리', '메모: 위젯 아이디어']
 let S = null
 let item = null
 let busy = false
@@ -22,60 +22,46 @@ function hints() {
 }
 
 function preview() {
-  const [ic, label] = KIND[item.kind] || KIND.task
-  const when = item.date ? `${A.formatKoreanDate(item.date)}${item.start ? ` ${item.start}` : item.kind === 'event' ? ' 종일' : ''}` : ''
-  const where = { event: S?.account ? '구글 캘린더' : '앱 일정', task: '활동 보드', one_thing: '오늘의 단 하나', note: '메모' }[item.kind]
-  $body.innerHTML = `<div class="card"><span class="kind">${icon(ic, 22)}</span>
-    <div class="what"><b>${esc(item.title)}</b><span>${esc([label, when, item.minutes ? `${item.minutes}분` : '', `→ ${where}`].filter(Boolean).join(' · '))}</span></div></div>
-    ${item.eval ? `<div class="answer">${UI.evalCard(item.eval)}</div>` : ''}
-    <div class="foot"><span><kbd>Enter</kbd>추가 · 고치려면 계속 입력</span><span>${item.source && item.source !== 'rules' ? 'AI 해석' : '규칙 해석'}</span></div>`
-
+  $body.innerHTML = NFInputReview.render(item, S?.account) + `<button class="chip" data-save-input>확인한 내용 저장</button>
+    <div class="foot"><span>내용을 수정한 뒤 저장하세요</span><span><kbd>Esc</kbd>닫기</span></div>`
 }
-
-
 
 async function submit() {
   const shown = $q.value.trim()
   const text = pasted && shown.startsWith('📄') ? pasted : shown
   if (!text || busy) return
+  nf.setInputActive?.(true).catch(() => {})
   if (item && item._text === text) {
     busy = true
-    const r = await nf.commitInput(item)
+    NFInputReview.read($body, item)
+    let r
+    try { r = await nf.commitInput(item) }
+    catch (e) { r = { ok: false, message: e.message } }
     busy = false
-    $body.innerHTML = `<div class="done">✓ ${esc(r?.message || '추가했어요')}</div>`
+    if (!r?.ok) {
+      if (r?.remaining?.length) item = { ...item, kind: 'batch', items: r.remaining }
+      preview()
+      $body.insertAdjacentHTML('afterbegin', `<p role="alert">${esc(r?.message || '저장하지 못했어요')}</p>`)
+      return
+    }
+    $body.innerHTML = `<div class="done">✓ ${esc(r.message)}</div>`
     item = null
     pasted = null
     $q.value = ''
+    nf.setInputActive?.(false).catch(() => {})
     setTimeout(() => {
       nf.hideQuick()
       hints()
     }, 900)
     return
   }
-  if (/^[?？]/.test(text)) return askCoach(text)
   busy = true
-  $body.innerHTML = `<div class="msg">${text === pasted ? '공문을 읽고 일정·체력·전략을 평가하는 중…' : '해석하는 중…'}</div>`
+  $body.innerHTML = `<div class="msg">${text === pasted ? '일정 정보를 읽는 중…' : '해석하는 중…'}</div>`
   try {
-    item = { ...(await nf.previewInput(text)), _text: text }
+    const result = await nf.previewInput(text)
+    if (!result) throw new Error('해석을 완료하지 못했어요. 다시 시도해 주세요')
+    item = { ...result, _text: text }
     preview()
-  } catch (e) {
-    $body.innerHTML = `<div class="msg">${esc(e.message)}</div>`
-  }
-  busy = false
-}
-
-// "?질문" → 코치에게 묻기 (일정·D-day·리듬 원칙을 보고 답한다)
-async function askCoach(text) {
-  busy = true
-  item = null
-  $body.innerHTML = `<div class="msg">${icon('sparkles', 16)} 일정을 보고 생각하는 중…</div>`
-  try {
-    const r = await nf.askCoach(text)
-    if (!r) throw new Error('지금은 답할 수 없어요. 잠시 뒤 다시 물어보세요.')
-    $body.innerHTML = `<div class="answer"><p>${esc(r.answer)}</p>
-      ${r.actions?.length ? `<ul>${r.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
-      ${r.facts?.length ? `<p><b>확인한 사실</b></p><ul>${r.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}</div>
-      <div class="foot"><span>${r.source === 'rules' ? '규칙 점검' : r.source === 'claude' ? 'Claude Code' : 'Gemini'}${r.error ? ` · AI 실패: ${esc(r.error.slice(0, 60))}` : ''}</span><span><kbd>Esc</kbd>닫기</span></div>`
   } catch (e) {
     $body.innerHTML = `<div class="msg">${esc(e.message)}</div>`
   }
@@ -91,10 +77,13 @@ document.addEventListener('keydown', (e) => {
     item = null
     $q.value = ''
     hints()
+    pasted = null
+    nf.setInputActive?.(false).catch(() => {})
     nf.hideQuick()
   }
 })
 $q.addEventListener('input', () => {
+  nf.setInputActive?.(!!$q.value.trim()).catch(() => {})
   if (!$q.value.trim().startsWith('📄')) pasted = null
   if (!item && !$q.value.trim()) hints()
   if (item && $q.value.trim() !== item._text && item._text !== pasted) {
@@ -108,6 +97,7 @@ $q.addEventListener('paste', (e) => {
   const t = e.clipboardData?.getData('text') || ''
   if (!/\n/.test(t.trim())) return
   e.preventDefault()
+  nf.setInputActive?.(true).catch(() => {})
   pasted = t
   $q.value = `📄 ${t.trim().split(/\r?\n/)[0].slice(0, 40)}… (공문 ${t.trim().split(/\r?\n/).length}줄)`
   item = null
@@ -115,6 +105,7 @@ $q.addEventListener('paste', (e) => {
 })
 
 $body.addEventListener('click', (e) => {
+  if (e.target.closest('[data-save-input]')) return submit()
   const ex = e.target.closest('[data-ex]')
   if (ex) {
     $q.value = ex.dataset.ex

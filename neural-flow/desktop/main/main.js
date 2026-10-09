@@ -28,12 +28,13 @@ const { Store, uid } = require('./store.js')
 const A = require('../renderer/shared/agenda.js')
 const brain = require('./brain.js')
 const { pullRemote } = require('./calendar.js')
-const { pullNews } = require('./news.js')
 const { createScheduler } = require('./scheduler.js')
 const google = require('./google.js')
 const { interpret } = require('./input.js')
-const coach = require('./coach.js')
+const { issues, commitBatch } = require('../renderer/shared/input-review.js')
 const { detectClaude, providerOf } = require('./llm.js')
+const { detectCodex } = require('./codex.js')
+const scheduleCoach = require('./schedule-coach.js')
 const { pinToDesktop } = require('./win-desktop.js')
 
 const ROOT = path.join(__dirname, '..')
@@ -42,6 +43,8 @@ const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
 const DEV = process.argv.includes('--dev')
 const TEST_HOOK = process.env.NF_TEST_HOOK // 테스트용: E2E 스크립트 경로 (스케줄러를 끄고 스크립트가 앱을 조작)
+
+if (TEST_HOOK && process.env.NF_DATA_DIR) app.setPath('userData', process.env.NF_DATA_DIR)
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -56,6 +59,8 @@ let tray = null
 let quick = null
 let widgetMode = 'pinned' // pinned(바탕화면 고정) | edit(이동·상호작용)
 let desktopPin = null // Windows Win+D 보호
+let codexStatus = null
+const inputDrafts = new Set()
 let claudeVersion = null // 노트북에 설치된 Claude Code 버전 (없으면 null)
 const busy = {}
 
@@ -156,12 +161,13 @@ function setKey(key) {
 function llm() {
   const s = store.get().settings
   const key = getKey().key
-  const base = { key, model: s.geminiModel || 'gemini-2.5-flash', claudeCmd: process.env.NF_CLAUDE_CMD || s.claudeCmd, claudeModel: s.claudeModel }
+  const base = { codexCmd: process.env.NF_CODEX_CMD || s.codexCmd, codexModel: s.codexModel, key, model: s.geminiModel || 'gemini-2.5-flash', claudeCmd: process.env.NF_CLAUDE_CMD || s.claudeCmd, claudeModel: s.claudeModel }
   const engine = s.engine || 'auto'
   if (engine === 'off') return { ...base, provider: 'none' }
+  if (engine === 'codex') return { ...base, provider: 'codex' }
   if (engine === 'claude') return { ...base, provider: 'claude' }
   if (engine === 'gemini') return { ...base, provider: key ? 'gemini' : 'none' }
-  return { ...base, provider: claudeVersion ? 'claude' : key ? 'gemini' : 'none' }
+  return { ...base, provider: codexStatus?.subscription ? 'codex' : claudeVersion ? 'claude' : 'none' }
 }
 
 // ── 화면에 보낼 스냅샷 (비밀값 제외) ─────────────────────────────────────────
@@ -192,6 +198,7 @@ function snapshot() {
     hasKey: !!k.key,
     keySource: k.source,
     claudeVersion,
+    codexStatus,
     provider: providerOf(llm()),
   }
   // 잠겨 있으면 일정·활동 같은 개인 데이터는 화면에 보내지 않는다
@@ -211,7 +218,7 @@ function snapshot() {
     englishHistory: (d.englishHistory || []).slice(-30),
     news: d.news,
     history: (d.history || []).slice(-60),
-    coachTips: coachTips(),
+    coachTips: [],
   }
 }
 
@@ -230,6 +237,7 @@ async function withBusy(job, fn) {
   try {
     return await fn()
   } catch (e) {
+    if (job === 'input') throw e
     console.error(`[${job}]`, e)
   } finally {
     setBusy(job, false)
@@ -244,14 +252,6 @@ function notify(title, body, view = 'today') {
 }
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────
-function todayContext() {
-  const d = store.get()
-  const today = A.ymd(new Date())
-  const todayAgenda = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities }, today, today)
-  const deadlines = A.deadlines({ events: d.events, activities: d.activities }, today)
-  return { today, todayAgenda, deadlines }
-}
-
 function recordHistory(d, brief) {
   if (!brief) return
   d.history = (d.history || []).filter((h) => h.date !== brief.date)
@@ -259,110 +259,33 @@ function recordHistory(d, brief) {
   d.history = d.history.slice(-120)
 }
 
-async function runBrief(mode = 'daily') {
-  return withBusy('brief', async () => {
-    const ctx = todayContext()
-    const brief = await brain.makeBrief(store.get(), llm(), { ...ctx, mode })
-    store.update((d) => {
-      // 같은 날 같은 '단 하나'면 완료 상태를 유지
-      if (d.brief && d.brief.date === brief.date && d.brief.one_thing === brief.one_thing) brief.done = d.brief.done
-      d.brief = brief
-      recordHistory(d, brief)
-      if (mode === 'weekly' && Array.isArray(brief.recommendations)) {
-        const names = new Set(d.activities.map((a) => a.name))
-        for (const r of brief.recommendations) {
-          if (!r.name || names.has(r.name)) continue
-          d.activities.push({
-            id: uid(),
-            name: r.name,
-            domain: r.domain || '',
-            priority: r.priority || '중간',
-            energy: r.energy || '가벼움',
-            repeat: '1회',
-            min: Number(r.min) || null,
-            date: null,
-            status: '제안됨', // 승인 게이트: 사용자가 보드에서 승인해야 일정이 된다
-            why: r.why || '',
-          })
-        }
-      }
-    })
-    return brief
-  })
-}
-
-async function runEnglish() {
-  return withBusy('english', async () => {
-    const ctx = todayContext()
-    const english = await brain.makeEnglish(store.get(), llm(), { ...ctx, brief: store.get().brief })
-    store.update((d) => {
-      d.english = english
-      d.englishHistory = [...(d.englishHistory || []).filter((h) => h.date !== english.date), english].slice(-60)
-    })
-  })
-}
-
-async function runNews() {
-  return withBusy('news', async () => {
-    const { items, errors, fetchedAt } = await pullNews(store.get().settings.feeds || [])
-    const summary = await brain.summarizeNews(store.get(), llm(), items)
-    store.update((d) => {
-      d.news = { items, errors, fetchedAt, summary: summary || d.news?.summary || null }
-    })
-  })
-}
-
 // 구글 캘린더(로그인) + ICS 주소(선택)를 합쳐 remote 로
 async function runCalendar() {
   return withBusy('calendar', async () => {
+    const previous = store.get().remote
     const s = store.get().settings
     const remote = await pullRemote(s.icsUrls || [])
     const gc = googleClient()
     if (gc) {
       try {
         const cals = await gc.calendars()
-        const chosen = s.google.calendarIds ? cals.filter((c) => s.google.calendarIds.includes(c.id)) : cals.filter((c) => c.selected)
+        const target = s.google.defaultCalendar || 'primary'
+        const chosen = cals.filter((c) => (s.google.calendarIds ? s.google.calendarIds.includes(c.id) : c.selected) || (target === 'primary' ? c.primary : c.id === target))
         const now = new Date()
         const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 45)
         const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 150)
         const g = await gc.events(chosen, from, to)
-        remote.events.push(...g.events)
+        const failed = new Set(g.errors.map((e) => e.calendarId))
+        remote.events.push(...g.events.filter((e) => !failed.has(e.calendarId)), ...(previous.events || []).filter((e) => e.source === 'google' && failed.has(e.calendarId)))
         remote.errors.push(...g.errors.map((e) => ({ url: e.calendar, message: e.message })))
         remote.calendars = cals
       } catch (e) {
+        remote.events.push(...(previous.events || []).filter((e) => e.source === 'google'))
+        remote.calendars = previous.calendars || []
         remote.errors.push({ url: 'Google', message: e.message })
       }
     }
     store.update((d) => (d.remote = remote))
-  })
-}
-
-// ── 코칭 ─────────────────────────────────────────────────────────────────────
-function coachContext() {
-  const d = store.get()
-  const today = A.ymd(new Date())
-  const occ = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities, doneMap: d.doneMap || {} }, today, A.addDays(today, 6))
-  const deadlines = A.deadlines({ events: d.events, activities: d.activities }, today)
-  return { occ, deadlines, today, coach: d.settings.coach }
-}
-
-function coachTips() {
-  const now = new Date()
-  try {
-    return coach.tips({ ...coachContext(), nowMin: now.getHours() * 60 + now.getMinutes() })
-  } catch (e) {
-    console.error('[coach]', e)
-    return []
-  }
-}
-
-async function askCoach(question) {
-  const q = String(question || '').replace(/^\s*[?？]/, '').trim()
-  if (!q) return null
-  return withBusy('coach', async () => {
-    const r = await coach.ask(q, { ...coachContext(), now: new Date(), brief: store.get().brief, llm: llm() })
-    store.update((x) => (x.inbox = [...(x.inbox || []), { at: new Date().toISOString(), kind: 'ask', title: q, result: r.answer.slice(0, 200) }].slice(-100)))
-    return r
   })
 }
 
@@ -371,23 +294,9 @@ async function previewInput(text) {
   const t = String(text || '').trim()
   if (!t) return null
   return withBusy('input', async () => {
-    const item = await interpret(t, { today: A.ymd(new Date()), llm: llm(), profile: store.get().profile })
-    if (item?.kind === 'event' && item.date) item.eval = await evaluateItem(item)
+    const item = await interpret(t, { today: A.ymd(new Date()), llm: llm(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })
     return item
   })
-}
-
-// 새 일정 평가: 공문은 AI 까지(전략), 짧은 입력은 규칙(겹침·체력)만 — 미리보기가 느려지지 않게
-async function evaluateItem(item) {
-  try {
-    const d = store.get()
-    const occ = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities, doneMap: d.doneMap || {} }, A.addDays(item.date, -1), A.addDays(item.date, 3))
-    const ctx = { occ, deadlines: A.deadlines({ events: d.events, activities: d.activities }, A.ymd(new Date()), 60), coach: d.settings.coach, profile: d.profile }
-    return item.announcement ? await coach.evaluate(item, { ...ctx, llm: llm() }) : { ...coach.checkFit(item, ctx), source: 'rules' }
-  } catch (e) {
-    console.error('[evaluate]', e)
-    return null
-  }
 }
 
 function endOf(start, minutes) {
@@ -397,6 +306,9 @@ function endOf(start, minutes) {
 }
 
 async function commitInput(item) {
+  if (item?.kind === 'batch') return commitBatch(item, commitInput)
+  const errors = issues(item)
+  if (errors.length) return { ok: false, message: errors.join(' · ') }
   const today = A.ymd(new Date())
   const d = store.get()
   const log = (msg) =>
@@ -422,46 +334,29 @@ async function commitInput(item) {
     return { ok: true, message: '활동 보드에 추가했어요' }
   }
   // event: 로그인돼 있으면 구글 캘린더, 아니면 앱 안 일정
-  const note = [item.summary, item.link, item.eval?.strategy && `[코치] ${item.eval.verdict} · ${item.eval.strategy}`].filter(Boolean).join('\n')
-  const ev = { title: item.title, date: item.date || today, start: item.start || null, minutes: item.minutes || 60, note, location: item.location || '' }
+  const note = [item.note, item.summary, item.link].filter(Boolean).join('\n')
+  const ev = { title: item.title, date: item.date, start: item.start || null, end: item.end || null, repeat: item.repeat || null, minutes: item.minutes || 60, note, location: item.location || '' }
   const gc = item.target !== 'local' && googleClient()
   if (gc) {
     try {
       await gc.createEvent(d.settings.google.defaultCalendar || 'primary', ev, Intl.DateTimeFormat().resolvedOptions().timeZone)
       log('구글 캘린더에 추가')
-      runCalendar()
-      return { ok: true, message: '구글 캘린더에 추가했어요' }
+      await runCalendar()
+      return { ok: true, message: '구글 캘린더에 추가했어요 · 모바일에서도 같은 캘린더를 확인하세요' }
     } catch (e) {
-      log(`구글 실패 → 앱에 저장: ${e.message}`)
+      log(`구글 저장 실패: ${e.message}`)
+      return { ok: false, message: `구글 캘린더에 저장하지 못했어요: ${e.message}` }
     }
   }
+  if (item.target === 'google') return { ok: false, message: 'Google 로그인 후 다시 저장해 주세요' }
   store.update((x) =>
-    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: endOf(ev.start, item.minutes), domain: item.domain || '', note, repeat: null, deadline: false, source: 'local' })
+    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: ev.end || endOf(ev.start, ev.minutes), domain: item.domain || '', location: ev.location, note, repeat: ev.repeat, deadline: false, source: 'local' })
   )
   log('앱 일정에 추가')
   return { ok: true, message: gc ? '구글 저장에 실패해 앱 일정에 넣었어요' : '일정에 추가했어요' }
 }
 
-const jobs = {
-  async morning() {
-    const brief = await runBrief('daily')
-    await runEnglish()
-    if (brief) notify('🌊 오늘의 단 하나', brief.one_thing)
-  },
-  async weekly() {
-    await runBrief('weekly')
-    notify('🗓️ 주간 추천이 도착했어', '활동 보드에서 이번 주 할 일을 승인해 줘.', 'board')
-  },
-  checkin() {
-    const b = store.get().brief
-    if (b && b.date === A.ymd(new Date()) && !b.done) {
-      notify('🌙 저녁 체크인', `오늘의 단 하나 했어? — ${b.one_thing}`)
-    }
-  },
-  news: runNews,
-  calendar: runCalendar,
-  onNewDay: () => broadcast(),
-}
+const jobs = { calendar: runCalendar, onNewDay: () => broadcast() }
 
 // ── 위젯 창 ──────────────────────────────────────────────────────────────────
 function widgetBounds(height = 640) {
@@ -625,7 +520,6 @@ function buildTray() {
       { label: `빠른 입력 (${IS_MAC ? '⌘⇧Space' : 'Ctrl+Shift+Space'})`, click: toggleQuick },
       { label: '열기 (오늘)', click: () => openManager('today') },
       { label: '캘린더', click: () => openManager('calendar') },
-      { label: '활동 보드', click: () => openManager('board') },
       { type: 'separator' },
       { label: s.widget.visible !== false ? '위젯 숨기기' : '위젯 보이기', click: toggleWidgetVisible },
       {
@@ -642,8 +536,7 @@ function buildTray() {
         },
       },
       { type: 'separator' },
-      { label: '지금 브리핑 만들기', click: () => jobs.morning() },
-      { label: '뉴스 새로고침', click: () => runNews() },
+      { label: '캘린더 새로고침', click: () => runCalendar() },
       { type: 'separator' },
       ...(update.available ? [{ label: `업데이트 ${update.version} 설치`, click: () => installUpdate() }] : []),
       {
@@ -684,6 +577,7 @@ function startSecurityWatch() {
 // ── 업데이트 ─────────────────────────────────────────────────────────────────
 let notifiedVersion = ''
 async function checkUpdate({ manual = false } = {}) {
+  if (update.checking || update.downloading != null || update.installing) return update
   update = { ...update, checking: true, error: '' }
   broadcast()
   try {
@@ -692,28 +586,35 @@ async function checkUpdate({ manual = false } = {}) {
     const skip = store.get().settings.updates.skipVersion
     if (r.available && r.version !== notifiedVersion && (manual || r.version !== skip)) {
       notifiedVersion = r.version
-      notify(`⬆️ neural-flow ${r.version} 업데이트`, '설정 또는 트레이에서 한 번에 설치할 수 있어요', 'settings')
+      if (!store.get().settings.updates.autoInstall) notify(`⬆️ neural-flow ${r.version} 업데이트`, '설정에서 설치할 수 있어요', 'settings')
     }
   } catch (e) {
     update = { ...update, checking: false, error: e.message }
   }
   broadcast()
   buildTray()
+  if (!manual && store.get().settings.updates.autoInstall !== false && update.available) {
+    update.pending = inputDrafts.size > 0
+    if (updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, dirty: inputDrafts.size > 0 })) await installUpdate()
+  }
   return update
 }
 function startUpdateWatch() {
   if (TEST_HOOK) return
   const run = () => store.get().settings.updates.autoCheck && checkUpdate()
-  setTimeout(run, 15000)
+  setTimeout(run, 1500)
   setInterval(run, 6 * 3600 * 1000)
 }
+let stagedUpdate = null
 async function installUpdate() {
+  if (update.downloading != null || update.installing) return { ok: false, message: '업데이트 중이에요' }
+  if (inputDrafts.size) { update.pending = true; broadcast(); return { ok: false, message: '입력 중인 일정을 저장하거나 닫으면 업데이트해요' } }
   if (!update.available || !update.asset) return { ok: false, message: '받을 업데이트가 없어요' }
   if (!app.isPackaged && !process.env.NF_UPDATE_DRYRUN) return { ok: false, message: '개발 실행 중이에요 — git pull 로 업데이트하세요' }
   try {
     update = { ...update, downloading: 0 }
     broadcast()
-    const got = await updater.download(update.asset, (p) => {
+    const got = stagedUpdate?.version === update.version ? stagedUpdate.got : await updater.download(update.asset, (p) => {
       update.downloading = Math.round(p * 100)
       broadcast()
     })
@@ -722,12 +623,16 @@ async function installUpdate() {
       broadcast()
       return { ok: true, dryRun: true, verified: got.verified, sha256: got.sha256 }
     }
+    stagedUpdate = { version: update.version, got }
+    if (inputDrafts.size) { update.pending = true; broadcast(); return { ok: false, message: '입력한 내용을 저장한 뒤 자동 업데이트해요' } }
+    update.installing = true
+    broadcast()
     store.flush()
     updater.install(got.file, { appPath: IS_MAC ? path.resolve(app.getAppPath(), '..', '..', '..') : undefined })
     setTimeout(() => app.exit(0), 500)
     return { ok: true }
   } catch (e) {
-    update = { ...update, downloading: null, error: e.message }
+    update = { ...update, downloading: null, installing: false, error: e.message }
     broadcast()
     return { ok: false, message: e.message }
   }
@@ -736,7 +641,7 @@ async function installUpdate() {
 // ── IPC ──────────────────────────────────────────────────────────────────────
 function registerIpc() {
   // 잠겨 있을 때도 쓸 수 있는 채널만 열어 두고, 나머지는 로그인 전 거부
-  const OPEN = new Set(['nf:security:unlock', 'nf:update:check', 'nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:auth:simple', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open'])
+  const OPEN = new Set(['nf:security:unlock', 'nf:update:check', 'nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:auth:simple', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open', 'nf:input:active'])
   const handle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = (ch, fn) =>
     handle(ch, (...args) => {
@@ -745,6 +650,22 @@ function registerIpc() {
     })
 
   ipcMain.handle('nf:snapshot', () => snapshot())
+  ipcMain.handle('nf:input:active', (e, active) => {
+    if (active && !inputDrafts.has(e.sender.id)) {
+      inputDrafts.add(e.sender.id)
+      e.sender.once('destroyed', () => {
+        inputDrafts.delete(e.sender.id)
+        if (!inputDrafts.size && update.pending && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, installing: update.installing })) installUpdate()
+      })
+    } else if (!active) inputDrafts.delete(e.sender.id)
+    if (!inputDrafts.size && update.pending && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, installing: update.installing })) installUpdate()
+  })
+  ipcMain.handle('nf:coach:review', (_e, question) => withBusy('coach', () => {
+    const d = store.get()
+    const today = A.ymd(new Date())
+    const items = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities }, today, A.addDays(today, 6))
+    return scheduleCoach.review(question, { items, today, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, llm: llm() })
+  }))
 
   // PIN 해제 — 5번 틀리면 30초 대기
   let fails = 0
@@ -854,7 +775,6 @@ function registerIpc() {
 
   ipcMain.handle('nf:input:preview', (_e, text) => previewInput(text))
   ipcMain.handle('nf:input:commit', (_e, item) => commitInput(item))
-  ipcMain.handle('nf:coach:ask', (_e, q) => askCoach(q))
   ipcMain.handle('nf:quick:hide', () => quick?.hide())
   ipcMain.handle('nf:quick:open', () => toggleQuick())
   ipcMain.handle('nf:google:delete', async (_e, calendarId, eventId) => {
@@ -862,9 +782,8 @@ function registerIpc() {
     await runCalendar()
   })
   ipcMain.handle('nf:engine:detect', async () => {
-    claudeVersion = await detectClaude(process.env.NF_CLAUDE_CMD || store.get().settings.claudeCmd)
-    broadcast()
-    return claudeVersion
+    await detectEngines()
+    return { claudeVersion, codexStatus }
   })
 
   ipcMain.handle('nf:event:save', (_e, ev) => {
@@ -964,7 +883,7 @@ function registerIpc() {
   )
 
   ipcMain.handle('nf:run', (_e, job) => {
-    const map = { brief: () => runBrief('daily'), weekly: () => runBrief('weekly'), english: runEnglish, news: runNews, calendar: runCalendar }
+    const map = { calendar: runCalendar }
     return map[job] ? map[job]() : null
   })
 
@@ -994,7 +913,7 @@ function registerIpc() {
     if (patch.security && 'encryptData' in patch.security) store.flush()
     if ('autoStart' in patch) applyAutoStart()
     if (icsBefore !== JSON.stringify(after.icsUrls) || patch.google?.calendarIds !== undefined) runCalendar()
-    if (patch.engine || patch.claudeCmd) detectClaude(process.env.NF_CLAUDE_CMD || after.claudeCmd).then((v) => ((claudeVersion = v), broadcast()))
+    if (patch.engine || patch.claudeCmd || patch.codexCmd) detectEngines()
     buildTray()
   })
 
@@ -1025,6 +944,14 @@ function applyAutoStart() {
   const on = !!store.get().settings.autoStart
   if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: on })
   else if (IS_WIN) app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: [app.getAppPath()] })
+}
+
+async function detectEngines() {
+  const s = store.get().settings
+  const [codex, claude] = await Promise.all([detectCodex(process.env.NF_CODEX_CMD || s.codexCmd), detectClaude(process.env.NF_CLAUDE_CMD || s.claudeCmd)])
+  codexStatus = codex
+  claudeVersion = claude
+  broadcast()
 }
 
 // ── 시작 ─────────────────────────────────────────────────────────────────────
@@ -1069,11 +996,7 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.warn('[quick] 단축키 등록 실패:', e.message)
   }
-  // Claude Code 가 깔려 있는지 확인 (엔진 auto 일 때 우선 사용)
-  detectClaude(process.env.NF_CLAUDE_CMD || store.get().settings.claudeCmd).then((v) => {
-    claudeVersion = v
-    broadcast()
-  })
+  detectEngines()
 
   // 잠겨 있는 동안(로그인 전)에는 자동 작업·알림을 돌리지 않는다
   const lockedJobs = Object.fromEntries(Object.entries(jobs).map(([k, fn]) => [k, (...a) => (locked() ? undefined : fn(...a))]))

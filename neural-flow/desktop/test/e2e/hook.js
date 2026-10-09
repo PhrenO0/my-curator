@@ -35,6 +35,7 @@ ${[1, 2, 3].map((i) => `<item><title>테스트 뉴스 ${i}</title><link>https://
 </channel></rss>`
 
 function geminiReply(prompt) {
+  if (prompt.includes('일정 코치')) return { answer: '겹침과 이동 시간을 확인하세요.', observations: [], questions: ['장소가 정해졌나요?'] }
   if (prompt.includes('일정 비서')) return { kind: 'event', title: '커피챗', date: tomorrow, start: '15:00', minutes: 60, domain: '🤝 관계·사랑', reply: 'ok' }
   if (prompt.includes('영어 회화 코치'))
     return {
@@ -190,7 +191,7 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
       encOk ? saved.account.refreshEnc.startsWith('enc:') && !JSON.stringify(saved).includes('"rt"') : saved.account.refreshEnc === 'raw:rt',
       saved.account.refreshEnc.slice(0, 8)
     )
-    check('state.json 시드', s.activities.length > 0 && s.events.length > 0, `활동 ${s.activities.length} · 일정 ${s.events.length}`)
+    check('자동 일정 시드 없음', s.activities.length === 0 && s.events.length === 0, `활동 ${s.activities.length} · 일정 ${s.events.length}`)
 
     // ── 3) 구글 캘린더 ──
     for (let i = 0; i < 25 && !(await snap()).remote.calendars; i++) await wait(200)
@@ -237,42 +238,19 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     check('Gemini 키 저장 + 스냅샷에 키 원문 없음', r.ok && s.settings.hasKey && s.settings.provider === 'gemini' && !JSON.stringify(s).includes('test-key'))
     item = await js("nf.previewInput('내일 3시 커피챗')")
     check('입력 해석(Gemini)', item.source === 'gemini' && item.title === '커피챗' && item.start === '15:00', JSON.stringify(item))
-    await js("nf.run('brief')")
+    const before = (await snap()).activities.length
+    for (const job of ['brief', 'weekly', 'english', 'news']) await js(`nf.run('${job}')`)
     s = await snap()
-    check('Gemini 데일리 브리핑', s.brief?.source === 'gemini' && s.brief.one_thing.startsWith('MOCK'), s.brief?.one_thing)
-    const before = s.activities.length
-    await js("nf.run('weekly')")
-    await js("nf.run('weekly')")
-    s = await snap()
-    const added = s.activities.filter((a) => a.name.startsWith('MOCK 추천'))
-    check('주간 추천 → 제안됨으로만, 중복 없이', added.length === 2 && added.every((a) => a.status === '제안됨'), `${before}→${s.activities.length}`)
-    await js("nf.run('english')")
-    s = await snap()
-    check('Gemini 영어 표현', s.english?.source === 'gemini' && s.english.expression.includes('touch base'))
-    await js(`nf.saveSettings({ feeds: [{ name: '로컬', url: '${base}/feed.xml' }] })`)
-    await js("nf.run('news')")
-    s = await snap()
-    check('RSS 수집 + AI 요약', s.news.items.length === 3 && s.news.items[0].title === '테스트 뉴스 1' && s.news.summary?.bullets?.length === 3)
-
-    // ── 6) 엔진: 노트북의 Claude Code (가짜 CLI) ──
-    const ver = await js('nf.detectEngine()')
-    await js("nf.saveSettings({ engine: 'claude' })")
-    s = await snap()
-    check('Claude Code 감지', /9\.9\.9/.test(ver || '') && s.settings.provider === 'claude', ver)
-    item = await js("nf.previewInput('포트폴리오 정리해야 함')")
-    check('입력 해석(Claude Code)', item.source === 'claude' && item.title.startsWith('CLAUDE:') && item.kind === 'task', JSON.stringify(item))
-    await js("nf.run('brief')")
-    s = await snap()
-    r = await js("nf.askCoach('?이번 주 무리 없어?')")
-    check('코치 질문(Claude Code)', r?.source === 'claude' && r.answer.startsWith('CLAUDE 코치') && r.actions.length === 1, JSON.stringify(r)?.slice(0, 120))
-    s = await snap()
-    item = await js(`nf.previewInput(${JSON.stringify('[클럽] 설명회 안내\n10/12(월) 저녁 8시 무료 설명회\n신청하세요')})`)
-    check('공문 → 일정 + 평가(Claude Code)', item.announcement && item.title === 'CLAUDE: AI 설명회' && item.start === '20:00' && item.eval?.verdict === '추천' && item.eval.strategy.startsWith('CLAUDE 전략') && item.eval.facts[0] === 'WEB 확인', JSON.stringify(item)?.slice(0, 160))
-    check('코치 팁 스냅샷', Array.isArray(s.coachTips) && s.settings.coach?.enabled === true)
-    check('Claude Code 브리핑', s.brief?.source === 'claude' && s.brief.one_thing.startsWith('CLAUDE:'), s.brief?.one_thing)
-    await js("nf.saveSettings({ engine: 'auto' })")
-    s = await snap()
-    check('엔진 auto → Claude Code 우선', s.settings.provider === 'claude')
+    check('자동 추천·뉴스·영어 생성 경로 제거', s.activities.length === before && !s.english && !s.news.items.length && !s.coachTips.length)
+    const engine = await js('nf.detectEngine()')
+    check('ChatGPT 구독 로그인 감지', engine.codexStatus?.subscription === true)
+    await js("nf.saveSettings({ engine: 'codex' })")
+    item = await js("nf.previewInput('내일 오후 3시 커피챗')")
+    check('Codex 구독으로 입력 해석 + 입력 조언', item.source === 'codex' && item.title === 'CODEX: 커피챗' && !!item.coaching)
+    const eventCount = (await snap()).events.length
+    r = await js("nf.reviewSchedule('일정을 잘 쓰려면?')")
+    check('LLM 일정 코칭은 일정 추가 없이 조언만', r.ok && r.source === 'codex' && r.answer.startsWith('CODEX:') && (await snap()).events.length === eventCount)
+    await js("nf.saveSettings({ engine: 'off' })")
 
     // ── 7) iCal 주소도 함께 ──
     await js(`nf.saveSettings({ icsUrls: ['${base}/cal.ics'] })`)
@@ -288,12 +266,16 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     await js('nf.toggleOneThing()')
     s = await snap()
     check('단 하나 완료 + 기록', s.brief.done === true && s.history.some((h) => h.date === today && h.done))
+    await js(`nf.saveEvent({ title: '직접 쓴 반복 일정', date: '${today}', start: '07:00', repeat: 'daily' })`)
+    s = await snap()
     const occ = A.occurrences({ events: s.events, remote: s.remote.events, activities: s.activities, doneMap: s.doneMap }, today, today)
     const routine = occ.find((o) => o.repeat === 'daily')
     await js(`nf.toggleOccurrence(${JSON.stringify(routine.key)})`)
     s = await snap()
     check('반복 일정은 날짜별로 완료', !!s.doneMap[routine.key])
 
+    await js(`nf.saveActivity({ name: '직접 쓴 지난 할 일', date: '${A.addDays(today, -1)}', status: '예정됨' })`)
+    s = await snap()
     const stale = s.activities.filter((a) => a.date && a.date < today && !['완료', '보류'].includes(a.status)).length
     const moved = await js('nf.archiveStale()')
     s = await snap()
@@ -344,7 +326,7 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
       ps('(New-Object -ComObject Shell.Application).ToggleDesktop()')
     }
     await cap(getWidget(), 'widget.png')
-    for (const v of ['today', 'calendar', 'board', 'brief', 'settings']) {
+    for (const v of ['today', 'calendar', 'settings']) {
       await js(`location.hash = '${v}'`)
       await cap(m, `app-${v}.png`)
     }
