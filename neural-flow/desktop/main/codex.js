@@ -54,6 +54,9 @@ async function callCodex({ codexCmd = 'codex', codexModel }, prompt, { timeoutMs
     if (r.code !== 0) throw new Error(`Codex 실행 오류: ${r.err.slice(-300) || r.code}`)
     const text = fs.readFileSync(output, 'utf8').trim()
     return require('./llm.js').parseJson(text)
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally {
+    // Windows: 종료 중인 Codex 가 폴더를 잡고 있으면 EBUSY — 정리 실패가 원래 오류를 가리지 않게
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) } catch {}
+  }
 }
 module.exports = { detectCodex, callCodex }
