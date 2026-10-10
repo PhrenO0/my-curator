@@ -394,6 +394,42 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
       r = await js('nf.installUpdate()')
       check('업데이트 받기 + SHA-256 검증', r.ok && r.dryRun && r.verified, JSON.stringify(r).slice(0, 80))
     }
+    // ── 업데이트 팝업·배너·위젯 알림 (화면만 검사: 가짜 새 버전 상태를 주입) ──
+    await js("location.hash = 'today'")
+    await wait(300)
+    await js(`(async () => {
+      S.update = { available: true, version: '9.9.9', current: S.version, notes: '테스트 노트', asset: { size: 83886080 } }
+      S.settings.updates.skipVersion = ''
+      document.getElementById('ask-input').value = ''
+      updateLater = ''
+      renderUpdate()
+    })()`)
+    await wait(200)
+    const pop1 = await js("JSON.stringify({ open: document.getElementById('update-dialog').open, text: document.getElementById('update-dialog').innerText })")
+    const p1 = JSON.parse(pop1)
+    check('새 버전 팝업이 뜸 (버전·용량·노트·지금 업데이트)', p1.open && /9\.9\.9/.test(p1.text) && /80MB/.test(p1.text) && /테스트 노트/.test(p1.text) && /지금 업데이트/.test(p1.text), p1.text.replace(/\s+/g, ' ').slice(0, 80))
+    await cap(m, 'update-popup.png')
+    await js("document.querySelector('#update-dialog [data-act=update-later]').click()")
+    await wait(200)
+    const after = JSON.parse(await js("JSON.stringify({ open: document.getElementById('update-dialog').open, banner: !document.getElementById('update-banner').hidden && document.getElementById('update-banner').innerText })"))
+    check('나중에 → 팝업 닫히고 상단 배너 유지', !after.open && /9\.9\.9/.test(after.banner || ''), after.banner)
+    await js("document.querySelector('#update-banner [data-act=update-open]').click()")
+    await wait(200)
+    await js("S.update = { ...S.update, downloading: 40 }; renderUpdate()")
+    await wait(100)
+    const dl = JSON.parse(await js("JSON.stringify({ w: document.querySelector('#update-dialog .update-progress i')?.style.width, disabled: document.querySelector('#update-dialog [data-act=update-install]').disabled, later: !!document.querySelector('#update-dialog [data-act=update-later]') })"))
+    check('받는 중: 진행률 표시 · 버튼 잠김 · 닫기 버튼 숨김', dl.w === '40%' && dl.disabled && !dl.later, JSON.stringify(dl))
+    const cancelled = await js("(() => { const e = new Event('cancel', { cancelable: true }); document.getElementById('update-dialog').dispatchEvent(e); return e.defaultPrevented })()")
+    check('받는 중에는 Esc 로 닫히지 않음', cancelled === true)
+    await js("S.update = null; renderUpdate(); document.getElementById('update-dialog').open && document.getElementById('update-dialog').close()")
+    // 위젯: 새 버전 알림 칩
+    const w = getWidget()
+    await w.webContents.executeJavaScript("S.update = { available: true, version: '9.9.9' }; render(); 1")
+    const pill = await w.webContents.executeJavaScript("document.querySelector('.update-pill')?.innerText || ''")
+    check('위젯에 새 버전 알림 칩', /9\.9\.9/.test(pill), pill)
+    await w.webContents.executeJavaScript("S.update = null; render(); 1")
+    await js('refresh()')
+    await w.webContents.executeJavaScript('refresh()')
     await js("location.hash = 'settings'")
     await cap(m, 'app-settings-security.png')
 

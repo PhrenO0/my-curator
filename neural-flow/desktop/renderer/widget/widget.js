@@ -147,8 +147,12 @@ function render() {
   )
   const dayItems = occ.filter((o) => o.date === selected)
   const sec = S.settings.widget
+  const upd = S.update?.available && S.update.version !== S.settings.updates?.skipVersion
   root.innerHTML =
     editBar() +
+    (upd
+      ? `<button class="update-pill" data-act="open" data-view="update">${icon('sparkles', 13)}<span>${esc(S.update.version)} 새 버전 — 눌러서 업데이트</span></button>`
+      : '') +
     clockCard() +
     (sec.showCalendar !== false ? calendarCard(occ, dayItems) : '')
 
