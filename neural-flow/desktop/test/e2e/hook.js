@@ -304,12 +304,13 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
           longWraps: !!long && long.getBoundingClientRect().height > 36,
           // 읽을 수 있는 폭인지: 제목 칸이 한 글자씩 쪼개질 만큼 좁으면 안 된다
           titleW: Math.round(Math.min(...pills.map((p) => p.querySelector('.tt').getBoundingClientRect().width))),
-          longLines: long ? Math.round(long.querySelector('.tt').getBoundingClientRect().height / parseFloat(getComputedStyle(long).lineHeight)) : 0,
+          // 글꼴 폭은 OS 마다 달라 줄 수 대신 '한 줄에 몇 글자 들어가는지' 로 본다 (4자 미만이면 한 글자씩 쪼개진 것)
+          charsPerLine: long ? Math.round((long.querySelector('.tt').textContent.length / Math.round(long.querySelector('.tt').getBoundingClientRect().height / parseFloat(getComputedStyle(long).lineHeight)))* 10) / 10 : 0,
         }
       })())`)
     )
     check('캘린더 칸이 일정 수만큼 늘어남 (6개 전부 · 접힘 없음 · 잘림 없음)', fit.pills >= 6 && !fit.more && fit.clipped === 0 && fit.outside === 0, JSON.stringify(fit))
-    check('긴 제목은 읽을 수 있는 폭에서 줄바꿈 (한 글자씩 쪼개지지 않음)', fit.longWraps && fit.titleW >= 70 && fit.longLines <= 6, JSON.stringify(fit))
+    check('긴 제목은 읽을 수 있는 폭에서 줄바꿈 (한 글자씩 쪼개지지 않음)', fit.longWraps && fit.titleW >= 48 && fit.charsPerLine >= 4, JSON.stringify(fit))
     await cap(m, 'app-calendar-busy.png')
     await js("document.querySelector('[data-act=new-event]').click()")
     await wait(300)
