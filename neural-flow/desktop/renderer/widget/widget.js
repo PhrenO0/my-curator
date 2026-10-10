@@ -92,7 +92,6 @@ function agendaBody(items) {
   const label = selected === S.today ? '오늘' : A.formatKoreanDate(selected)
   const list = items.length
     ? `<ul class="agenda">${items
-        .slice(0, 4)
         .map(
           (o) => `
         <li class="ag ${o.done ? 'done' : ''}">
@@ -107,7 +106,7 @@ function agendaBody(items) {
           }
         </li>`
         )
-        .join('')}</ul>${items.length > 4 ? `<div class="foot"><span>외 ${items.length - 4}개 · 관리 창에서 보기</span></div>` : ''}`
+        .join('')}</ul>`
     : `<div class="empty">일정이 없어요.</div>`
   return `
   <div class="agenda-wrap">
