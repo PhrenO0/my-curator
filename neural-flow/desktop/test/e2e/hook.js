@@ -284,6 +284,33 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     // ── 9) 화면 ──
     await js("location.hash = 'calendar'")
     await wait(400)
+    // 한 날짜에 일정이 많아도 칸이 늘어나 전부 보이는지 (자르거나 '+N개' 로 접지 않음)
+    const busyDay = today
+    for (let i = 0; i < 6; i++) {
+      await js(`nf.saveEvent({ title: '${i === 0 ? '아주 긴 제목의 일정이라 한 줄에 다 안 들어가는 경우 — 2026 중간고사 대비 스터디 모임' : `겹친 일정 ${i}`}', date: '${busyDay}', start: '${String(8 + i).padStart(2, '0')}:00' })`)
+    }
+    await wait(500)
+    const fit = JSON.parse(
+      await js(`JSON.stringify((() => {
+        const cell = document.querySelector('.cell[data-date="${busyDay}"]')
+        const pills = [...cell.querySelectorAll('.pill')]
+        const cr = cell.getBoundingClientRect()
+        const long = pills.find((p) => p.textContent.includes('아주 긴 제목'))
+        return {
+          pills: pills.length,
+          more: !!cell.querySelector('.more'),
+          clipped: pills.filter((p) => p.scrollHeight > p.clientHeight + 1 || p.scrollWidth > p.clientWidth + 1).length,
+          outside: pills.filter((p) => p.getBoundingClientRect().bottom > cr.bottom + 1).length,
+          longWraps: !!long && long.getBoundingClientRect().height > 36,
+          // 읽을 수 있는 폭인지: 제목 칸이 한 글자씩 쪼개질 만큼 좁으면 안 된다
+          titleW: Math.round(Math.min(...pills.map((p) => p.querySelector('.tt').getBoundingClientRect().width))),
+          longLines: long ? Math.round(long.querySelector('.tt').getBoundingClientRect().height / parseFloat(getComputedStyle(long).lineHeight)) : 0,
+        }
+      })())`)
+    )
+    check('캘린더 칸이 일정 수만큼 늘어남 (6개 전부 · 접힘 없음 · 잘림 없음)', fit.pills >= 6 && !fit.more && fit.clipped === 0 && fit.outside === 0, JSON.stringify(fit))
+    check('긴 제목은 읽을 수 있는 폭에서 줄바꿈 (한 글자씩 쪼개지지 않음)', fit.longWraps && fit.titleW >= 70 && fit.longLines <= 6, JSON.stringify(fit))
+    await cap(m, 'app-calendar-busy.png')
     await js("document.querySelector('[data-act=new-event]').click()")
     await wait(300)
     check('새 일정 모달 (저장 위치 선택 포함)', await js("document.getElementById('modal').open && !!document.querySelector('select[name=target]')"))

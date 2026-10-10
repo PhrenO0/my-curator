@@ -375,19 +375,16 @@ function viewCalendar() {
   const grid = cells
     .map((c) => {
       const all = map[c.date] || []
-      // 매일·평일 루틴은 칸마다 반복되면 시끄러워서 숫자로만 표시 (오른쪽 패널에는 전부 나옴)
-      const routines = all.filter((o) => o.repeat === 'daily' || o.repeat === 'weekdays')
-      const items = all.filter((o) => !routines.includes(o))
-      const shown = items.slice(0, 3)
+      // 칸이 일정 수만큼 늘어나도록 전부 보여준다 (자르거나 '+N개' 로 접지 않는다)
+      const items = all
       return `<div class="cell ${c.inMonth ? '' : 'out'} ${c.date === S.today ? 'today' : ''} ${c.date === cal.sel ? 'sel' : ''} ${c.weekday === 0 ? 'sun' : ''}" data-act="sel-day" data-date="${c.date}">
-        <div class="cell-h"><span class="n">${c.day}</span>${routines.length ? `<span class="rt" title="루틴 ${routines.length}개">${icon('repeat', 10)}${routines.length}</span>` : ''}</div>
-        ${shown
+        <div class="cell-h"><span class="n">${c.day}</span>${items.length > 3 ? `<span class="rt" title="일정 ${items.length}개">${items.length}</span>` : ''}</div>
+        ${items
           .map(
             (o) =>
-              `<button class="pill ${o.done ? 'done' : ''}" style="--c:${o.color}" ${o.kind !== 'remote' ? `data-act="edit-occ" data-kind="${o.kind}" data-id="${esc(o.id)}"` : o.link ? `data-act="link" data-url="${esc(o.link)}"` : ''} title="${esc(`${o.start ? o.start + ' ' : ''}${o.title}`)}"><span class="tt">${esc(o.title)}</span></button>`
+              `<button class="pill ${o.done ? 'done' : ''}" style="--c:${o.color}" ${o.kind !== 'remote' ? `data-act="edit-occ" data-kind="${o.kind}" data-id="${esc(o.id)}"` : o.link ? `data-act="link" data-url="${esc(o.link)}"` : ''} title="${esc(`${o.start ? o.start + ' ' : ''}${o.title}`)}">${o.start ? `<span class="tm">${esc(o.start)}</span>` : ''}<span class="tt">${esc(o.title)}</span></button>`
           )
           .join('')}
-        ${items.length > 3 ? `<span class="more">+${items.length - 3}개</span>` : ''}
       </div>`
     })
     .join('')
