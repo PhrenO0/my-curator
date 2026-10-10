@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('nf', {
   deleteGoogleEvent: call('nf:google:delete'),
   detectEngine: call('nf:engine:detect'),
   reviewSchedule: call('nf:coach:review'),
+  studyCourses: call('nf:study:courses'),
+  pickStudyFolder: call('nf:study:pick'),
+  planStudy: call('nf:study:plan'),
   setInputActive: call('nf:input:active'),
   // 보안 · 개인정보
   unlock: call('nf:security:unlock'),

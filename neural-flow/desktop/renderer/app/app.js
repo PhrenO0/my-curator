@@ -36,6 +36,8 @@ if (navigator.userAgent.includes('Mac')) document.body.classList.add('mac')
 
 async function refresh() {
   S = await nf.snapshot()
+  if (S.settings.study?.folder && (!studyInfo || studyInfo.folder !== S.settings.study.folder)) await loadStudy()
+  else if (!S.settings.study?.folder && studyInfo) studyInfo = null
   if (!cal) {
     const t = A.parseYmd(S.today)
     cal = { y: t.getFullYear(), m: t.getMonth(), sel: S.today }
@@ -329,13 +331,46 @@ function renderSide() {
 // ── 오늘 ────────────────────────────────────────────────────────────────────
 let coachResult = null
 let coachQuestion = ''
+// 과목 자료 폴더 연계 (exam-study 의 과목/<과목명>/)
+let studyInfo = null // { ok, folder, courses: [{ name, exam: { date, dday }, notes, … }], message }
+let studyCourse = '' // '' = 전체 과목
+async function loadStudy() {
+  try {
+    studyInfo = await nf.studyCourses()
+  } catch {
+    studyInfo = null
+  }
+}
+const ddayText = (e) => (e ? (e.dday === 0 ? 'D-day' : e.dday > 0 ? `D-${e.dday}` : `D+${-e.dday}`) : '시험일 미확인')
+function studyCard() {
+  const folder = S.settings.study?.folder
+  if (!folder) {
+    return `<section class="card"><h2>${icon('book', 16)}과목별 공부</h2>
+      <p>exam-study 같은 과목 자료 폴더를 연결하면, 과목별 시험일(D-day)과 시험 전략을 보고 코칭받고 공부 일정을 제안받을 수 있어요.</p>
+      <button class="btn" data-act="study-pick">과목 자료 폴더 선택</button></section>`
+  }
+  if (!studyInfo?.ok) {
+    return `<section class="card"><h2>${icon('book', 16)}과목별 공부</h2>
+      <p role="alert">${esc(studyInfo?.message || '과목 자료를 읽지 못했어요')}</p><p class="muted small">${esc(folder)}</p>
+      <div class="btn-row"><button class="btn" data-act="study-pick">폴더 다시 선택</button><button class="btn ghost" data-act="study-reload">새로고침</button></div></section>`
+  }
+  const chip = (name, label, on) => `<button class="btn sm ${on ? 'primary' : ''}" data-act="course-pick" data-course="${esc(name)}">${label}</button>`
+  return `<section class="card"><h2>${icon('book', 16)}과목별 공부</h2>
+    <div class="btn-row" style="flex-wrap:wrap;gap:6px">${chip('', '전체', studyCourse === '')}${studyInfo.courses
+      .map((c) => chip(c.name, `${esc(c.name)} · ${esc(ddayText(c.exam))}`, studyCourse === c.name))
+      .join('')}</div>
+    <p class="muted small">${studyCourse ? `'${esc(studyCourse)}' 자료로 아래 코칭을 받아요.` : '모든 과목의 시험 전략을 함께 보고 우선순위를 잡아요.'} 자료는 읽기만 하고, 질문·제안할 때 선택한 AI에 보내요.</p>
+    <div class="btn-row"><button class="btn primary" data-act="study-plan" ${S.busy.coach ? 'disabled' : ''}>${S.busy.coach ? '만드는 중…' : '이번 주 공부 일정 제안'}</button>
+    <button class="btn ghost" data-act="study-reload" title="폴더를 다시 읽어요 (git pull 뒤)">새로고침</button></div></section>`
+}
 function viewToday() {
   const items = occ(S.today, S.today)
   return `<div class="page-h"><div class="titles"><div class="eyebrow">내가 입력한 일정</div><h1>${A.formatKoreanDate(S.today)}</h1></div>
     <button class="btn" data-act="run" data-job="calendar">${icon('refresh-cw', 14)}동기화</button>
     <button class="btn primary" data-act="new-event" data-date="${S.today}">${icon('plus', 14)}일정 추가</button></div>
     <section class="card"><h2>오늘 일정 · ${items.length}</h2>${agendaList(items)}</section>
-    <section class="card"><h2>일정 코칭</h2>
+    ${studyCard()}
+    <section class="card"><h2>일정 코칭${studyCourse ? ` · ${esc(studyCourse)}` : ''}</h2>
     <p>일정의 겹침·빠진 정보·준비 시간을 AI와 점검하세요.</p>
     <input class="input" id="coach-question" value="${esc(coachQuestion)}" placeholder="이번 주 일정을 잘 쓰려면 무엇을 확인해야 할까?" />
     <button class="btn" data-act="coach-review" ${S.busy.coach ? 'disabled' : ''}>${S.busy.coach ? '검토 중…' : '일정 검토 받기'}</button>
@@ -514,6 +549,16 @@ function viewSettings() {
       ${field('Claude 모델', '비워 두면 기본 모델', `<input class="input" data-set="claudeModel" value="${esc(s.claudeModel || '')}" />`)}
       ${field('Gemini API 키', s.hasKey ? '키가 설정되어 있어요' : '키를 설정하면 Gemini로 입력을 해석할 수 있어요.', `<div class="inline"><input class="input" id="key" type="password" autocomplete="off" placeholder="새 키 입력" /><button class="btn" data-act="save-key">저장·연결 확인</button></div>`)}
       ${field('Gemini 모델', '', `<input class="input" data-set="geminiModel" value="${esc(s.geminiModel)}" />`)}
+    </section>
+
+    <section class="card"><h2>${icon('book', 16)}과목 자료 연계</h2>
+      ${field(
+        '과목 자료 폴더',
+        `exam-study 레포처럼 <code>과목/&lt;과목명&gt;/README.md · 시험전략.md</code> 구조의 폴더. 읽기 전용이고, 코칭·일정 제안을 요청할 때만 선택한 AI에 내용을 보내요. ${
+          studyInfo?.ok ? `<br><b style="color:var(--ok)">과목 ${studyInfo.courses.length}개 찾음</b>` : studyInfo?.message ? `<br><span style="color:var(--danger)">${esc(studyInfo.message)}</span>` : ''
+        }`,
+        `<div class="inline"><input class="input" data-set="study.folder" value="${esc(s.study?.folder || '')}" placeholder="C:\\Users\\…\\exam-study" /><button class="btn" data-act="study-pick">폴더 선택</button></div>`
+      )}
     </section>
 
     <section class="card"><h2>${icon('calendar-days', 16)}iCal 주소 (선택 · 읽기 전용)</h2>
@@ -770,8 +815,34 @@ document.addEventListener('click', async (e) => {
       renderAskPreview()
       reportDraft()
       return
+    case 'course-pick':
+      studyCourse = el.dataset.course || ''
+      return render()
+    case 'study-reload':
+      await loadStudy()
+      render()
+      return toast(studyInfo?.ok ? `과목 ${studyInfo.courses.length}개를 다시 읽었어요` : studyInfo?.message || '읽지 못했어요')
+    case 'study-pick': {
+      const r = await nf.pickStudyFolder()
+      if (r?.ok) {
+        await refresh()
+        await loadStudy()
+        render()
+        toast(studyInfo?.ok ? `과목 ${studyInfo.courses.length}개를 찾았어요` : studyInfo?.message || '')
+      }
+      return
+    }
+    case 'study-plan': {
+      const r = await nf.planStudy({ course: studyCourse, days: 7 })
+      if (!r?.ok) return toast(r?.message || '공부 일정을 제안하지 못했어요')
+      askItem = { ...r.item, _text: '' }
+      $scroll.scrollTop = 0
+      renderAskPreview()
+      reportDraft()
+      return toast('제안이 맨 위에 떴어요 — 고친 뒤 [확인한 내용 저장]을 누르세요')
+    }
     case 'coach-review': {
-      coachResult = await nf.reviewSchedule(coachQuestion)
+      coachResult = await nf.reviewSchedule(coachQuestion, studyCourse)
       coachQuestion = ''
       render()
       reportDraft()
