@@ -41,7 +41,66 @@ async function refresh() {
     cal = { y: t.getFullYear(), m: t.getMonth(), sel: S.today }
   }
   render()
+  renderUpdate()
 }
+
+// ── 새 버전: 팝업 + 배너 + 사이드바 버튼 ──
+const $updateDialog = document.getElementById('update-dialog')
+const $updateBanner = document.getElementById('update-banner')
+let updateLater = '' // 이번 실행에서 '나중에' 누른 버전
+let updateMsg = ''
+const mb = (n) => (n ? `${(n / 1048576).toFixed(0)}MB` : '')
+
+function updateVisible() {
+  const u = S?.update
+  return !!(S && !S.locked && u?.available && u.version !== S.settings.updates.skipVersion)
+}
+
+function renderUpdate(force = false) {
+  const u = S?.update || {}
+  const visible = updateVisible()
+  const busy = u.downloading != null || u.installing
+  if (!visible) {
+    $updateBanner.hidden = true
+    if ($updateDialog.open && !busy) $updateDialog.close()
+    return
+  }
+  // 팝업: 새 버전이 처음 보일 때 한 번 (입력 중이면 방해하지 않고 배너만)
+  const typing = !!($askInput.value.trim() || $modal.open)
+  if (!$updateDialog.open && (force || (updateLater !== u.version && !typing))) $updateDialog.showModal()
+  if (force) updateLater = ''
+  $updateBanner.hidden = $updateDialog.open
+  $updateBanner.innerHTML = `<div class="update-banner">${icon('sparkles', 15)}<span><b>${esc(u.version)}</b> 새 버전이 나왔어요</span><button class="btn sm primary" data-act="update-open">업데이트</button></div>`
+  if (!$updateDialog.open) return
+  const pct = u.downloading ?? 0
+  const status = u.installing
+    ? `<div class="update-status">설치하고 다시 시작하는 중… 잠시 뒤 앱이 자동으로 켜져요</div>`
+    : u.downloading != null
+      ? `<div class="update-progress"><i style="width:${pct}%"></i></div><div class="update-status">받는 중 ${pct}%</div>`
+      : u.pending
+        ? `<div class="update-status">입력 중인 내용을 저장하거나 닫으면 바로 업데이트해요</div>`
+        : u.error || updateMsg
+          ? `<div class="update-status err">${esc(u.error || updateMsg)}</div>`
+          : `<div class="update-status">받은 파일은 SHA-256 으로 검증한 뒤 설치하고, 끝나면 앱이 자동으로 다시 켜져요</div>`
+  $updateDialog.innerHTML = `<div class="update-card">
+    <div class="update-icon">${icon('sparkles', 26)}</div>
+    <h3>새 버전이 나왔어요</h3>
+    <div class="update-ver"><span>v${esc(u.current || S.version)}</span>${icon('chevron-right', 14)}<b>v${esc(u.version)}</b>${u.asset?.size ? `<em>${mb(u.asset.size)}</em>` : ''}</div>
+    ${u.notes ? `<div class="update-notes">${esc(u.notes)}</div>` : ''}
+    ${status}
+    <div class="update-actions">
+      <button class="btn primary lg" data-act="update-install" ${busy || u.pending ? 'disabled' : ''}>${u.installing ? '설치하는 중…' : u.downloading != null ? `받는 중 ${pct}%` : '지금 업데이트'}</button>
+      ${busy ? '' : `<button class="btn ghost" data-act="update-later">나중에</button><button class="btn ghost" data-act="update-skip">이 버전 건너뛰기</button>`}
+    </div>
+    ${S.packaged ? '' : '<div class="update-status">개발 실행 중이라 자동 설치는 안 돼요 — git pull 로 업데이트하세요</div>'}
+  </div>`
+}
+// 받는 중·설치 중에는 Esc 로 닫히지 않게
+$updateDialog.addEventListener('cancel', (e) => {
+  if (S?.update?.downloading != null || S?.update?.installing) e.preventDefault()
+  else updateLater = S?.update?.version || ''
+})
+$updateDialog.addEventListener('close', () => renderUpdate())
 
 function go(r) {
   route = r
@@ -251,10 +310,10 @@ function renderSide() {
       }</div>
       ${
         S.update?.available
-          ? `<button class="btn sm soft" data-act="update-install" ${S.update.downloading != null ? 'disabled' : ''}>${icon('sparkles', 13)}${
-              S.update.downloading != null ? `받는 중 ${S.update.downloading}%` : `${esc(S.update.version)} 업데이트`
+          ? `<button class="btn sm soft" data-act="update-open">${icon('sparkles', 13)}${
+              S.update.downloading != null ? `받는 중 ${S.update.downloading}%` : S.update.installing ? '설치 중…' : `${esc(S.update.version)} 업데이트`
             }</button>`
-          : ''
+          : `<button class="btn sm ghost" data-act="update-check" title="새 버전이 있는지 확인">v${esc(S.version)} · ${S.update?.checking ? '확인 중…' : '업데이트 확인'}</button>`
       }
       ${
         S.account
@@ -671,15 +730,33 @@ document.addEventListener('click', async (e) => {
       await nf.wipeData()
       return toast('모두 지웠어요')
     case 'update-check': {
-      const u = await nf.checkUpdate()
-      return toast(u.error ? u.error : u.available ? `${u.version} 업데이트가 있어요` : '최신 버전이에요')
+      updateLater = ''
+      const u = await nf.checkUpdate({ manual: true })
+      if (u.available) {
+        await refresh()
+        return renderUpdate(true)
+      }
+      return toast(u.error ? u.error : '최신 버전이에요')
     }
+    case 'update-open':
+      return renderUpdate(true)
+    case 'update-later':
+      updateLater = S.update?.version || ''
+      $updateDialog.close()
+      return
     case 'update-install': {
+      updateMsg = ''
       const r = await nf.installUpdate()
-      return r && !r.ok && toast(r.message)
+      if (r && !r.ok) {
+        updateMsg = r.message || ''
+        renderUpdate()
+        return toast(r.message)
+      }
+      return
     }
     case 'update-skip':
       await nf.skipUpdate()
+      await refresh()
       return toast('이 버전은 알리지 않을게요')
     case 'signout':
       await nf.signOut()
@@ -880,11 +957,20 @@ document.addEventListener('drop', async (e) => {
   if (id) await nf.setActivityStatus(id, col.dataset.status)
 })
 
-nf.onNavigate((v) => go(v))
+nf.onNavigate((v) => {
+  if (v === 'update') return renderUpdate(true)
+  go(v)
+})
 nf.onChange(refresh)
 window.addEventListener('hashchange', () => {
   route = location.hash.slice(1) || 'today'
   render()
 })
+// 위젯의 업데이트 알림으로 열렸으면 팝업부터
+if (route === 'update') {
+  route = 'today'
+  history.replaceState(null, '', '#today')
+  const openAfter = setInterval(() => S && (clearInterval(openAfter), renderUpdate(true)), 100)
+}
 setInterval(() => S && A.ymd(new Date()) !== S.today && refresh(), 60000)
 refresh()

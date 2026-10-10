@@ -184,6 +184,7 @@ function snapshot() {
     sessionLocked,
     needsLogin: needsLogin(),
     version: app.getVersion(),
+    packaged: app.isPackaged,
     update: { ...update },
     privacy: !!d.settings.security.privacyMode,
     encrypted: store.encrypted,
@@ -588,10 +589,12 @@ async function checkUpdate({ manual = false } = {}) {
   try {
     const r = await updater.check(app.getVersion())
     update = { ...r, checking: false }
+    // 직접 확인했는데 예전에 건너뛴 버전이면 건너뛰기를 풀어서 다시 보여준다
+    if (manual && r.available && r.version === store.get().settings.updates.skipVersion) store.update((d) => (d.settings.updates.skipVersion = ''))
     const skip = store.get().settings.updates.skipVersion
     if (r.available && r.version !== notifiedVersion && (manual || r.version !== skip)) {
       notifiedVersion = r.version
-      if (!store.get().settings.updates.autoInstall) notify(`⬆️ neural-flow ${r.version} 업데이트`, '설정에서 설치할 수 있어요', 'settings')
+      if (!store.get().settings.updates.autoInstall || !app.isPackaged) notify(`⬆️ neural-flow ${r.version} 업데이트`, '눌러서 업데이트하세요', 'update')
     }
   } catch (e) {
     update = { ...update, checking: false, error: e.message }

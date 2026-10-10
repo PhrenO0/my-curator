@@ -621,3 +621,25 @@ body.privacy .card:hover .ag .title {
 .coach .tip.good svg {
   color: #03b26c;
 }
+
+/* 새 버전 알림 */
+.update-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgb(49 130 246 / 0.35);
+}
+.update-pill:hover {
+  filter: brightness(1.06);
+}

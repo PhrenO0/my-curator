@@ -1370,3 +1370,108 @@ code {
   letter-spacing: 0.4em;
   height: 56px;
 }
+
+/* 새 버전 알림: 상단 배너 + 팝업 */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--r-xl, 16px);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--text);
+  font-size: 14px;
+}
+.update-banner svg {
+  color: var(--accent);
+  flex: none;
+}
+.update-banner span {
+  flex: 1;
+}
+.update-dialog {
+  width: min(420px, calc(100vw - 48px));
+}
+.update-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 28px 24px;
+  text-align: center;
+}
+.update-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.update-card h3 {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+.update-ver {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--text-2, var(--text));
+}
+.update-ver b {
+  color: var(--accent);
+}
+.update-ver em {
+  font-style: normal;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.update-notes {
+  width: 100%;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  font-size: 12.5px;
+  line-height: 1.55;
+  text-align: left;
+  white-space: pre-wrap;
+}
+.update-status {
+  font-size: 12.5px;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+.update-status.err {
+  color: var(--danger, #f04452);
+  opacity: 1;
+}
+.update-progress {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  overflow: hidden;
+}
+.update-progress i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+.update-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+}
+.update-dialog:focus,
+.update-dialog:focus-visible {
+  outline: none;
+}
