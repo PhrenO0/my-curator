@@ -31,8 +31,10 @@
     const esc = root.UI.esc
     const items = item.kind === 'batch' ? item.items : [item]
     return `${item.error ? `<p role="status">${esc(item.error)}</p>` : ''}<div class="input-review">
-      ${item.coaching ? `<section><b>입력 조언</b><p>${esc(item.coaching)}</p></section>` : ''}
-      <p>${item.source === 'rules' ? '규칙 해석' : 'AI 해석'} · ${items.length}개 · ${account ? 'Google 캘린더' : '앱에만 저장'}</p>
+      ${item.coaching ? `<section><b>${item.plan ? '공부 계획 요약' : '입력 조언'}</b><p>${esc(item.coaching)}</p></section>` : ''}
+      ${(item.questions || []).map((q) => `<p>확인: ${esc(q)}</p>`).join('')}
+      ${(item.warnings || []).map((w) => `<p>${esc(w)}</p>`).join('')}
+      <p>${item.plan ? 'AI 제안' : item.source === 'rules' ? '규칙 해석' : 'AI 해석'} · ${items.length}개 · ${item.plan ? '아직 저장되지 않았어요. 고친 뒤 추가하면 ' : ''}${account ? 'Google 캘린더' : '앱에만 저장'}</p>
       ${items.map((x, i) => `<fieldset data-review-index="${i}"><legend>${i + 1}번 입력</legend>
         ${x.saveError ? `<p role="alert">${esc(x.saveError)}</p>` : ''}
         ${(x.warnings || []).map((v) => `<p>${esc(v)}</p>`).join('')}

@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS = {
   },
   updates: { autoCheck: true, autoInstall: true, skipVersion: '' },
   coach: { enabled: false },
+  study: { folder: '' }, // 과목 자료 폴더 (예: exam-study 레포 — 그 안의 '과목/<과목명>/')
   widget: {
     visible: true,
     x: null,
@@ -127,6 +128,7 @@ function mergeSettings(saved) {
     security: { ...base.security, ...(saved.security || {}) },
     updates: { ...base.updates, ...(saved.updates || {}) },
     coach: { ...base.coach, ...(saved.coach || {}) },
+    study: { ...base.study, ...(saved.study || {}) },
   }
 }
 

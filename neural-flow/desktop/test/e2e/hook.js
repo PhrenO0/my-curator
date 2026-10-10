@@ -250,6 +250,34 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     const eventCount = (await snap()).events.length
     r = await js("nf.reviewSchedule('일정을 잘 쓰려면?')")
     check('LLM 일정 코칭은 일정 추가 없이 조언만', r.ok && r.source === 'codex' && r.answer.startsWith('CODEX:') && (await snap()).events.length === eventCount)
+
+    // ── 과목 자료 폴더 연계 (exam-study 구조) ──
+    const studyDir = path.join(process.env.NF_DATA_DIR, 'study-fixture')
+    fs.mkdirSync(path.join(studyDir, '과목', '교통정책론'), { recursive: true })
+    const exam = A.addDays(today, 11)
+    fs.writeFileSync(path.join(studyDir, '과목', '교통정책론', 'README.md'), '# 교통정책론\n중간 35%\n')
+    fs.writeFileSync(path.join(studyDir, '과목', '교통정책론', '시험전략.md'), `# 시험 전략\n| 항목 | 내용 |\n|---|---|\n| 날짜 | ${exam.slice(5, 7)}/${exam.slice(8, 10)}(수) 12:00–13:15 |\n우선순위 1: GC 계산\n`)
+    await js(`nf.saveSettings({ study: { folder: ${JSON.stringify(studyDir)} } })`)
+    const sc = await js('nf.studyCourses()')
+    check('과목 자료 폴더 연결 (과목·시험일·D-day)', sc.ok && sc.courses[0]?.name === '교통정책론' && sc.courses[0].exam?.dday === 11 && !JSON.stringify(sc).includes('GC 계산'), JSON.stringify(sc).slice(0, 120))
+    r = await js("nf.reviewSchedule('시험 준비는?', '교통정책론')")
+    check('과목 선택 코칭: 과목 자료가 AI 에 전달됨', r.ok && /교통정책론 자료/.test(r.answer), r.answer)
+    const evBefore = (await snap()).events.length
+    const pl = await js("nf.planStudy({ course: '교통정책론', days: 7 })")
+    check('공부 일정 제안: 저장 전 미리보기(batch)로만 돌려줌', pl.ok && pl.item.kind === 'batch' && pl.item.plan && pl.item.items[0].title.startsWith('[교통정책론]') && (await snap()).events.length === evBefore, JSON.stringify(pl).slice(0, 140))
+    // 화면: 과목 칩 + 제안 버튼 → 입력 검토 화면
+    await js("location.hash = 'today'")
+    await wait(700)
+    const chips = await js("[...document.querySelectorAll('[data-act=course-pick]')].map((b) => b.textContent.trim()).join('|')")
+    check('오늘 화면에 과목 칩(D-day)', /교통정책론 · D-11/.test(chips), chips)
+    await js("document.querySelector('[data-act=study-plan]').click()")
+    for (let i = 0; i < 30 && !(await js("document.querySelectorAll('#ask-preview [data-review-index]').length")); i++) await wait(200)
+    const prev = await js("document.getElementById('ask-preview').innerText")
+    check('제안이 입력 검토 화면에 뜸 (아직 저장 안 됨)', /아직 저장되지 않았어요/.test(prev) && /GC 계산 3회/.test(await js("[...document.querySelectorAll('#ask-preview [data-review-field=title]')].map((i) => i.value).join('|')")), prev.slice(0, 80))
+    await cap(m, 'study-plan.png')
+    await js("document.getElementById('ask-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))")
+    await wait(200)
+    await js("nf.saveSettings({ study: { folder: '' } })")
     await js("nf.saveSettings({ engine: 'off' })")
 
     // ── 7) iCal 주소도 함께 ──

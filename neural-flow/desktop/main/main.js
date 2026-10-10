@@ -35,6 +35,8 @@ const { issues, commitBatch } = require('../renderer/shared/input-review.js')
 const { detectClaude, providerOf } = require('./llm.js')
 const { detectCodex } = require('./codex.js')
 const scheduleCoach = require('./schedule-coach.js')
+const courses = require('./courses.js')
+const studyPlan = require('./study-plan.js')
 const { pinToDesktop } = require('./win-desktop.js')
 
 const ROOT = path.join(__dirname, '..')
@@ -668,11 +670,55 @@ function registerIpc() {
     } else if (!active) inputDrafts.delete(e.sender.id)
     if (!inputDrafts.size && update.pending && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, installing: update.installing })) installUpdate()
   })
-  ipcMain.handle('nf:coach:review', (_e, question) => withBusy('coach', () => {
+  // 과목 자료 폴더(예: exam-study) — 읽기 전용. 본문은 AI 호출 때만 쓰고 화면에는 요약만 보낸다.
+  const loadStudy = () => courses.loadCourses(store.get().settings.study?.folder || '', A.ymd(new Date()))
+  const weekItems = (days) => {
     const d = store.get()
     const today = A.ymd(new Date())
-    const items = A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities }, today, A.addDays(today, 6))
-    return scheduleCoach.review(question, { items, today, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, llm: llm() })
+    return A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities }, today, A.addDays(today, days - 1))
+  }
+  ipcMain.handle('nf:coach:review', (_e, question, course) => withBusy('coach', () => {
+    const today = A.ymd(new Date())
+    const loaded = loadStudy()
+    const name = loaded.courses.some((c) => c.name === course) ? course : ''
+    return scheduleCoach.review(question, {
+      items: weekItems(7),
+      today,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      llm: llm(),
+      course: name,
+      courseContext: loaded.ok ? courses.buildContext(loaded, { course: name, today }) : '',
+    })
+  }))
+  ipcMain.handle('nf:study:courses', () => {
+    const r = loadStudy()
+    return { ok: r.ok, folder: store.get().settings.study?.folder || '', message: r.message || '', courses: r.ok ? courses.summarize(r) : [] }
+  })
+  ipcMain.handle('nf:study:pick', async () => {
+    const win = manager && !manager.isDestroyed() ? manager : undefined
+    const r = await dialog.showOpenDialog(win, { title: '과목 자료 폴더 (예: exam-study)', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    store.update((d) => (d.settings.study = { ...d.settings.study, folder: r.filePaths[0] }))
+    return { ok: true, folder: r.filePaths[0] }
+  })
+  ipcMain.handle('nf:study:plan', (_e, opts = {}) => withBusy('coach', async () => {
+    const today = A.ymd(new Date())
+    const loaded = loadStudy()
+    if (!loaded.ok) return { ok: false, message: loaded.message || '설정에서 과목 자료 폴더를 지정해 주세요' }
+    const now = new Date()
+    const days = Math.min(14, Math.max(1, Number(opts.days) || 7))
+    return studyPlan.plan({
+      loaded,
+      docs: courses.loadPlanDocs(loaded.root),
+      items: weekItems(days),
+      today,
+      nowMin: now.getHours() * 60 + now.getMinutes(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      llm: llm(),
+      course: loaded.courses.some((c) => c.name === opts.course) ? opts.course : '',
+      days,
+      focus: opts.focus,
+    })
   }))
 
   // PIN 해제 — 5번 틀리면 30초 대기
