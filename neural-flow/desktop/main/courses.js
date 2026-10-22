@@ -3,7 +3,8 @@
 //
 //   <폴더>/과목/<과목명>/README.md        강의 정보·평가 비율·학기 일정
 //   <폴더>/과목/<과목명>/시험전략.md      시험일·범위·우선순위
-//   <폴더>/과목/<과목명>/{주차,녹음,오답,anki}/…  (개수만 센다)
+//   <폴더>/과목/<과목명>/{주차,녹음}/*.md  주차 노트 — 목록은 늘, 본문은 쪼개기 때 관련된 것만
+//   <폴더>/과목/<과목명>/{오답,anki}/…    (개수만 센다)
 //   <폴더>/계획/공부일정_*.md             가장 최근 파일만
 //   <폴더>/리듬.md                        수면·교회·상한 같은 규칙
 
@@ -13,6 +14,7 @@ const A = require('../renderer/shared/agenda.js')
 
 const MAX_FILE = 16 * 1024 // 파일 하나에서 읽는 최대 크기
 const MAX_COURSES = 30
+const MAX_NOTES = 60 // 과목 하나에서 보는 주차 노트 수
 
 // 폴더 밖으로 나가는 심볼릭 링크는 읽지 않는다
 function inside(root, target) {
@@ -97,17 +99,76 @@ function loadCourses(dir, today = A.ymd(new Date())) {
     const readme = readText(root, path.join(cdir, 'README.md'))
     const strategy = readText(root, path.join(cdir, '시험전략.md'))
     if (!readme && !strategy) continue // 자료가 없는 빈 폴더는 과목으로 보지 않는다
+    const notes = noteList(root, cdir)
     courses.push({
       name,
+      dir: cdir,
+      noteList: notes,
       readme,
       strategy,
       exam: parseExam(strategy, today) || parseExam(readme, today),
-      notes: countFiles(root, path.join(cdir, '주차'), /\.md$/) + countFiles(root, path.join(cdir, '녹음'), /\.md$/),
+      notes: notes.length,
       textbooks: countFiles(root, cdir, /^교과서.*\.md$/),
       anki: countFiles(root, path.join(cdir, 'anki'), /\.apkg$/),
     })
   }
   return { ok: true, root, courses }
+}
+
+// "05주차_접근성.md", "5주 Hansen.md", "w5.md" → 5
+function weekOf(name) {
+  const m = /(\d{1,2})\s*주/.exec(name) || /^(?:w|wk|week)?\s*0*(\d{1,2})(?!\d)/i.exec(name)
+  return m ? Number(m[1]) : null
+}
+
+// 주차·녹음 노트 목록 (본문 없이 파일·주차·제목만)
+function noteList(root, cdir) {
+  const out = []
+  for (const sub of ['주차', '녹음']) {
+    const dir = path.join(cdir, sub)
+    let files = []
+    try {
+      if (!inside(root, dir)) continue
+      files = fs.readdirSync(dir).filter((f) => /\.md$/i.test(f) && !f.startsWith('.')).sort()
+    } catch {
+      continue
+    }
+    for (const f of files) {
+      if (out.length >= MAX_NOTES) return out
+      const file = path.join(dir, f)
+      const head = readText(root, file, 1024)
+      if (!head && !inside(root, file)) continue
+      const h1 = /^#\s+(.+)$/m.exec(head)
+      out.push({ file: `${sub}/${f}`, week: weekOf(f), title: (h1 ? h1[1] : f.replace(/\.md$/i, '')).trim().slice(0, 80) })
+    }
+  }
+  return out
+}
+
+// 쪼갤 일과 관련된 노트 본문만 고른다: 같은 주차면 크게, 제목·본문에 같은 낱말이 있으면 더한다
+const STOP = new Set(['다시', '보기', '하기', '정리', '공부', '복습', '과제', '수업', '오늘', '내일', '이번', '그리고'])
+function tokens(text) {
+  return [...new Set(String(text || '').toLowerCase().split(/[^0-9a-z가-힣]+/).filter((t) => t.length >= 2 && !STOP.has(t) && !/^\d+$/.test(t)))]
+}
+
+function pickNotes(loaded, course, query, { max = 3, maxChars = 6000 } = {}) {
+  const c = (loaded?.courses || []).find((x) => x.name === course)
+  if (!c || !c.noteList?.length) return []
+  const qWeeks = [...String(query || '').matchAll(/(\d{1,2})\s*주/g)].map((m) => Number(m[1]))
+  const words = tokens(query)
+  const scored = c.noteList.map((n) => {
+    const text = readText(loaded.root, path.join(c.dir, n.file))
+    const low = text.toLowerCase()
+    let score = n.week != null && qWeeks.includes(n.week) ? 10 : 0
+    for (const w of words) {
+      if (n.title.toLowerCase().includes(w)) score += 3
+      else if (low.includes(w)) score += 1
+    }
+    return { ...n, text, score }
+  })
+  const top = scored.filter((n) => n.score > 0 && n.text).sort((a, b) => b.score - a.score || (a.week ?? 99) - (b.week ?? 99)).slice(0, max)
+  const per = Math.floor(maxChars / Math.max(1, top.length))
+  return top.map((n) => ({ course, file: n.file, week: n.week, title: n.title, text: clip(n.text, per) }))
 }
 
 // 계획·리듬 문서: 가장 최근 공부 일정 파일 + 리듬.md
@@ -146,9 +207,10 @@ function buildContext(loaded, { course = '', today, maxChars = 14000 } = {}) {
       const strategyShare = Math.floor(per * 0.7)
       const body = c.strategy ? `[시험 전략]\n${clip(c.strategy, strategyShare)}` : `[강의 정보]\n${clip(c.readme, per)}`
       const info = c.strategy && c.readme ? `\n[강의 정보]\n${clip(c.readme, per - strategyShare)}` : ''
-      return `### ${c.name} — ${exam} · 정리된 노트 ${c.notes}개 · 교과서 ${c.textbooks}개 · Anki ${c.anki}벌\n${body}${info}`
+      const list = c.noteList?.length ? `\n[정리된 주차 노트]\n${c.noteList.slice(0, 20).map((n) => `- ${n.file}${n.title && !n.file.includes(n.title) ? ` (${n.title})` : ''}`).join('\n')}` : ''
+      return `### ${c.name} — ${exam} · 정리된 노트 ${c.notes}개 · 교과서 ${c.textbooks}개 · Anki ${c.anki}벌\n${body}${info}${list}`
     })
     .join('\n\n')
 }
 
-module.exports = { loadCourses, loadPlanDocs, summarize, buildContext, parseExam, courseRoot }
+module.exports = { loadCourses, loadPlanDocs, summarize, buildContext, parseExam, courseRoot, pickNotes, weekOf, tokens }

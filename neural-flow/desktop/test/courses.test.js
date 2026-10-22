@@ -125,3 +125,40 @@ test('공부 일정 제안: 프롬프트에 자료·캘린더가 들어가고, �
     assert.equal(none.ok, false)
   }
 })
+
+test('주차 노트: 목록·주차 번호, 쪼갤 일과 관련된 노트만 고르기 (폴더 밖 링크 제외)', () => {
+  const dir = fixture()
+  const w = (rel, text) => fs.writeFileSync(path.join(dir, rel), text)
+  w('과목/교통정책론/주차/05주차_접근성.md', '# 5주차 접근성\nHansen 식 A_i = Σ O_j f(C_ij)\n저항함수 계단형·음지수형\n')
+  w('과목/교통정책론/주차/02주차.md', '# 2주차 일반화 통행비용\nGC = 통행시간 × VOT + 금전비용\n')
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-out-'))
+  fs.writeFileSync(path.join(out, 'secret.md'), '# 비밀 Hansen')
+  try {
+    fs.symlinkSync(path.join(out, 'secret.md'), path.join(dir, '과목/교통정책론/주차/09주차.md'))
+  } catch {}
+  assert.equal(courses.weekOf('05주차_접근성.md'), 5)
+  assert.equal(courses.weekOf('w7.md'), 7)
+  assert.equal(courses.weekOf('2026-10-06 메모.md'), null)
+  const r = courses.loadCourses(dir, '2026-10-10')
+  const t = r.courses[0]
+  assert.ok(t.noteList.some((n) => n.file === '주차/05주차_접근성.md' && n.week === 5 && n.title === '5주차 접근성'))
+  assert.ok(!t.noteList.some((n) => n.file === '주차/09주차.md'))
+  // 컨텍스트에는 목록만 (본문 없음)
+  const ctx = courses.buildContext(r, { course: '교통정책론', today: '2026-10-10' })
+  assert.match(ctx, /\[정리된 주차 노트\][\s\S]*주차\/05주차_접근성\.md \(5주차 접근성\)/)
+  assert.ok(!ctx.includes('저항함수'))
+  // 본문 단어로 고르기
+  const a = courses.pickNotes(r, '교통정책론', 'Hansen 식 다시 보기')
+  assert.equal(a[0].file, '주차/05주차_접근성.md')
+  assert.match(a[0].text, /저항함수/)
+  assert.ok(!a.some((n) => n.file === '주차/02주차.md'))
+  // 주차 번호로 고르기
+  assert.equal(courses.pickNotes(r, '교통정책론', '2주 복습')[0].file, '주차/02주차.md')
+  // 관련 없는 일·모르는 과목은 빈 배열
+  assert.deepEqual(courses.pickNotes(r, '교통정책론', '팀플 회의'), [])
+  assert.deepEqual(courses.pickNotes(r, '없는과목', 'Hansen'), [])
+  // 길이 상한
+  w('과목/교통정책론/주차/05주차_접근성.md', `# 5주차 Hansen\n${'가'.repeat(30000)}`)
+  const big = courses.pickNotes(courses.loadCourses(dir, '2026-10-10'), '교통정책론', 'Hansen', { maxChars: 2000 })
+  assert.ok(big[0].text.length < 2100)
+})
