@@ -3,6 +3,7 @@ const A = NFAgenda
 const { esc, timeAgo, speak } = UI
 
 const root = document.getElementById('root')
+const rootTop = document.getElementById('root-top')
 let S = null
 let selected = null
 let view = null // { y, m }
@@ -29,9 +30,8 @@ function plansCard() {
   const plans = (S.plans || []).filter((p) => p.tree && p.progress.done < p.progress.total)
   if (!plans.length) return ''
   const bar = (p) => {
-    const n = 10
-    const on = p.progress.total ? Math.round((p.progress.done / p.progress.total) * n) : 0
-    return `<span class="pbar" aria-label="${p.progress.done}/${p.progress.total}">${'▓'.repeat(on)}${'░'.repeat(n - on)}</span>`
+    const pct = p.progress.total ? Math.round((p.progress.done / p.progress.total) * 100) : 0
+    return `<span class="pbar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></span>`
   }
   return `<section class="card plans">
     <div class="card-h">${icon('list-todo', 13)}<span class="grow">쪼갠 할 일</span>
@@ -204,6 +204,7 @@ function editBar() {
 // 잠금 상태: 시계만 보여주고 개인 데이터는 숨긴다
 function renderLocked() {
   document.documentElement.style.setProperty('--glass-alpha', 0.72)
+  rootTop.innerHTML = ''
   root.innerHTML = `
   <section class="card">
     <div class="clock"><div>
@@ -226,19 +227,20 @@ function render() {
   const dayItems = occ.filter((o) => o.date === selected)
   const sec = S.settings.widget
   const upd = S.update?.available && S.update.version !== S.settings.updates?.skipVersion
-  root.innerHTML =
+  rootTop.innerHTML =
     editBar() +
     (upd
       ? `<button class="update-pill" data-act="open" data-view="update">${icon('sparkles', 13)}<span>${esc(S.update.version)} 새 버전 — 눌러서 업데이트</span></button>`
       : '') +
-    clockCard() +
+    clockCard()
+  root.innerHTML =
     plansCard() +
     (sec.showCalendar !== false ? calendarCard(occ, dayItems) : '')
 
 }
 
 // ── 상호작용 ─────────────────────────────────────────────────────────────────
-root.addEventListener('click', async (e) => {
+document.getElementById('wrap').addEventListener('click', async (e) => {
   const el = e.target.closest('[data-act]')
   if (!el) return
   e.preventDefault()

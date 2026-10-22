@@ -1549,9 +1549,18 @@ code {
   overflow-wrap: anywhere;
 }
 .pbar {
-  font-family: var(--font-num, ui-monospace, monospace);
-  letter-spacing: -1px;
-  color: var(--accent);
+  flex: none;
+  width: 96px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  overflow: hidden;
+}
+.pbar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
 }
 .tree-h .pn {
   font-size: 12.5px;

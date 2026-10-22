@@ -46,7 +46,8 @@ body::-webkit-scrollbar {
   }
 }
 
-#root {
+#root,
+#root-top {
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -545,10 +546,12 @@ body::-webkit-scrollbar {
 }
 
 /* 편집 모드: 창 전체를 끌어서 옮긴다 */
-body.edit #root {
+body.edit #root,
+body.edit #root-top {
   -webkit-app-region: drag;
 }
 body.edit #root button,
+body.edit #root-top button,
 body.edit #root a {
   -webkit-app-region: no-drag;
 }
@@ -708,10 +711,18 @@ body.privacy .card:hover .ag .title {
   overflow-wrap: anywhere;
 }
 .pbar {
-  font-family: var(--font-num);
-  letter-spacing: -1px;
-  color: var(--accent);
-  font-size: 11px;
+  flex: none;
+  width: 64px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--g-fill);
+  overflow: hidden;
+}
+.pbar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
 }
 .plan-h .pn {
   font-size: 11.5px;
@@ -759,8 +770,14 @@ body.privacy .plans .pt,
 body.privacy .plans .st {
   filter: blur(6px);
 }
+#root-top:empty {
+  display: none;
+}
+#root-top {
+  padding-bottom: 0;
+}
 #memo-wrap {
-  margin: 0 10px 10px;
+  margin: 10px 10px 0;
   color: var(--g-text);
 }
 #memo-wrap[hidden] {

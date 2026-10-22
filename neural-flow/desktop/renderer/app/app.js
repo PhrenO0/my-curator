@@ -719,9 +719,9 @@ function oneThingModal() {
 // ── 메모·쪼개기 ─────────────────────────────────────────────────────────────
 // 메모장(아무렇게나) → [Claude로 정리] → 후보를 하나씩 수락/버림 → [쪼개기] → 개념 트리
 let memoTimer = null
-const pbar = (p, n = 10) => {
-  const on = p.total ? Math.round((p.done / p.total) * n) : 0
-  return `<span class="pbar">${'▓'.repeat(on)}${'░'.repeat(n - on)}</span>`
+const pbar = (p) => {
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0
+  return `<span class="pbar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></span>`
 }
 function candTarget(c) {
   return c.date && c.start ? 'Google 캘린더 일정' : '앱 할 일'
@@ -769,7 +769,7 @@ function planTree(p) {
   const pr = p.progress || { done: 0, total: 0, minutes: 0 }
   const when = p.date ? `${A.formatKoreanDate(p.date)}${p.start ? ` ${p.start}` : ''}` : '날짜 없음'
   return `<div class="tree">
-    <div class="tree-h"><span class="tt">📚 ${esc(p.title)}</span>${p.tree ? `${pbar(pr, 5)}<span class="pn">${pr.done}/${pr.total}</span>` : ''}
+    <div class="tree-h"><span class="tt">📚 ${esc(p.title)}</span>${p.tree ? `${pbar(pr)}<span class="pn">${pr.done}/${pr.total}</span>` : ''}
       <button class="icon-btn" data-act="plan-remove" data-id="${esc(p.id)}" title="목록에서 지우기 (캘린더 일정은 그대로)">${icon('x', 13)}</button></div>
     <div class="muted small">${esc(when)}${p.tree ? ` · 조각 합계 ${pr.minutes}분` : ' · 아직 안 쪼갰어요'}</div>
     ${
