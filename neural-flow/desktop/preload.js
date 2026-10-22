@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('nf', {
   togglePlanStep: call('nf:plan:toggle'),
   removePlan: call('nf:plan:remove'),
   widgetFocus: call('nf:widget:focus'),
+  getMemory: call('nf:memory:get'),
+  reflectMemory: call('nf:memory:reflect'),
+  decideLearned: call('nf:memory:decide'),
   setInputActive: call('nf:input:active'),
   // 보안 · 개인정보
   unlock: call('nf:security:unlock'),

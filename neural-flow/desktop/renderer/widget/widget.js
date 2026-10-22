@@ -43,9 +43,10 @@ function plansCard() {
         p.tree.concepts.forEach((c, ci) => c.steps.forEach((st, si) => !st.done && next.push({ c, st, ci, si })))
         return `<div class="plan">
           <div class="plan-h"><span class="pt">${esc(p.title)}</span>${bar(p)}<span class="pn">${p.progress.done}/${p.progress.total}</span></div>
+          ${p.vision ? `<div class="pv">🎯 ${esc(p.vision)}</div>` : ''}
           ${next
             .slice(0, 3)
-            .map((x) => `<button class="step" data-act="step" data-plan="${esc(p.id)}" data-ci="${x.ci}" data-si="${x.si}"><span class="box"></span><span class="st">${esc(x.st.title)}</span><span class="sm">${x.st.minutes}분</span></button>`)
+            .map((x, i) => `<button class="step ${i === 0 ? 'next' : ''}" data-act="step" data-plan="${esc(p.id)}" data-ci="${x.ci}" data-si="${x.si}"><span class="box"></span><span class="st">${i === 0 ? '<b>▶ 다음</b> ' : ''}${esc(x.st.title)}</span><span class="sm">${x.st.minutes}분</span></button>`)
             .join('')}
         </div>`
       })

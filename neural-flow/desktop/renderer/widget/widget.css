@@ -783,3 +783,12 @@ body.privacy .plans .st {
 #memo-wrap[hidden] {
   display: none;
 }
+
+.plans .pv {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--g-text-3);
+}
+.step.next .st b {
+  color: var(--accent);
+}

@@ -38,6 +38,7 @@ const scheduleCoach = require('./schedule-coach.js')
 const courses = require('./courses.js')
 const studyPlan = require('./study-plan.js')
 const memo = require('./memo.js')
+const memory = require('./memory.js')
 const { pinToDesktop } = require('./win-desktop.js')
 
 const ROOT = path.join(__dirname, '..')
@@ -221,6 +222,7 @@ function snapshot() {
     memo: d.memo || { text: '' },
     memoCandidates: d.memoCandidates || [],
     memoQuestions: d.memoQuestions || [],
+    learnProposals: d.learnProposals || [],
     plans: (d.plans || []).map((p) => ({ ...p, progress: memo.progress(p.tree) })),
     settings: pub,
     profile: d.profile,
@@ -734,6 +736,10 @@ function registerIpc() {
   }))
 
   // ── 메모장 → 정리(제안) → 수락 → 쪼개기 ──
+  // 나에 대한 기억 (exam-study 메모리/ + 앱 프로필) — 정리·쪼개기·배운 점에 쓴다
+  const loadMem = () => memory.loadMemory(store.get().settings.study?.folder || '')
+  const memCtx = () => memory.memoryContext(loadMem(), store.get().profile)
+  const signal = (x) => store.update((d) => (d.signals = [...(d.signals || []), { at: new Date().toISOString(), ...x }].slice(-400)))
   ipcMain.handle('nf:memo:save', (_e, text) => {
     store.update((d) => (d.memo = { text: String(text ?? '').slice(0, memo.MAX_MEMO), updatedAt: new Date().toISOString() }))
     broadcast()
@@ -751,6 +757,7 @@ function registerIpc() {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       items: weekItems(14),
       courses: loaded.ok ? loaded.courses.map((c) => c.name) : [],
+      memory: memCtx(),
       llm: llmClaudeFirst(),
     })
     if (r.ok) store.update((x) => {
@@ -766,6 +773,7 @@ function registerIpc() {
     if (!c) return { ok: false, message: '이미 처리한 후보예요' }
     const today = A.ymd(new Date())
     if (action === 'drop') {
+      signal({ type: 'drop', title: c.title, course: c.course, fit: c.fit })
       store.update((x) => {
         x.memoCandidates = x.memoCandidates.filter((y) => y.id !== id)
         x.memo = { ...x.memo, text: memo.markLines(x.memo.text, c.lines, memo.MARK_DROP) }
@@ -782,10 +790,12 @@ function registerIpc() {
         : { kind: 'task', title, date: v.date, minutes: v.minutes }
     )
     if (!r?.ok) return r || { ok: false, message: '저장하지 못했어요' }
+    const changed = ['title', 'date', 'start', 'minutes'].filter((k) => (v[k] ?? null) !== (c[k] ?? null))
+    signal({ type: 'accept', title: v.title, course: v.course, kind: v.kind, minutes: v.minutes, changed, from: changed.length ? { date: c.date, start: c.start, minutes: c.minutes } : undefined, fit: v.fit })
     store.update((x) => {
       x.memoCandidates = x.memoCandidates.filter((y) => y.id !== id)
       x.memo = { ...x.memo, text: memo.markLines(x.memo.text, c.lines, memo.MARK_DONE) }
-      x.plans = [...(x.plans || []), { id: uid(), title, course: v.course, kind: v.kind, date: v.date, start: v.start, minutes: v.minutes, note: v.note, createdAt: new Date().toISOString(), tree: null }].slice(-50)
+      x.plans = [...(x.plans || []), { id: uid(), title, course: v.course, kind: v.kind, date: v.date, start: v.start, minutes: v.minutes, note: v.note, approach: v.approach, fit: v.fit, fitWhy: v.fitWhy, gain: v.gain, vision: v.vision, next: v.next, createdAt: new Date().toISOString(), tree: null }].slice(-50)
     })
     broadcast()
     return { ok: true, message: v.kind === 'event' ? '구글 캘린더(또는 앱 일정)에 넣었어요' : '앱 할 일에 넣었어요' }
@@ -796,7 +806,7 @@ function registerIpc() {
     const plans = (d.plans || []).filter((p) => want.includes(p.id))
     const loaded = loadStudy()
     const today = A.ymd(new Date())
-    const r = await memo.breakdown({ plans, contextFor: (course) => (loaded.ok ? courses.buildContext(loaded, { course, today, maxChars: 6000 }) : ''), llm: llmClaudeFirst() })
+    const r = await memo.breakdown({ plans, contextFor: (course) => (loaded.ok ? courses.buildContext(loaded, { course, today, maxChars: 6000 }) : ''), memory: memCtx(), llm: llmClaudeFirst() })
     if (r.ok) store.update((x) => {
       for (const p of x.plans || []) if (r.trees[p.id]) p.tree = r.trees[p.id]
     })
@@ -805,8 +815,12 @@ function registerIpc() {
   }))
   ipcMain.handle('nf:plan:toggle', (_e, planId, ci, si) => {
     store.update((x) => {
-      const step = (x.plans || []).find((p) => p.id === planId)?.tree?.concepts?.[ci]?.steps?.[si]
-      if (step) step.done = !step.done
+      const plan = (x.plans || []).find((p) => p.id === planId)
+      const step = plan?.tree?.concepts?.[ci]?.steps?.[si]
+      if (!step) return
+      step.done = !step.done
+      step.doneAt = step.done ? new Date().toISOString() : null
+      x.signals = [...(x.signals || []), { at: new Date().toISOString(), type: step.done ? 'step' : 'unstep', title: step.title, minutes: step.minutes, course: plan.course, concept: plan.tree.concepts[ci].title }].slice(-400)
     })
     broadcast()
     return true
@@ -815,6 +829,31 @@ function registerIpc() {
     store.update((x) => (x.plans = (x.plans || []).filter((p) => p.id !== planId)))
     broadcast()
     return true
+  })
+  ipcMain.handle('nf:memory:get', () => {
+    const mem = loadMem()
+    const d = store.get()
+    return { ok: mem.ok, folder: mem.folder, hasProfile: !!mem.profile, hasWorkstyle: !!mem.workstyle, hasCareer: !!mem.career, vision: mem.vision.slice(0, 600), learned: memory.learnedList(mem).slice(-30), stats: memory.statsText(memory.stats(d.signals || [], d.plans || [])), proposals: d.learnProposals || [] }
+  })
+  ipcMain.handle('nf:memory:reflect', () => withBusy('memo', async () => {
+    const d = store.get()
+    const r = await memory.reflect({ signals: d.signals || [], plans: d.plans || [], mem: loadMem(), appProfile: d.profile, llm: llmClaudeFirst() })
+    if (r.ok) store.update((x) => (x.learnProposals = r.notes.map((n) => ({ id: uid(), ...n }))))
+    broadcast()
+    return { ok: r.ok, message: r.message, count: r.notes?.length || 0 }
+  }))
+  ipcMain.handle('nf:memory:decide', (_e, id, keep, text) => {
+    const p = (store.get().learnProposals || []).find((x) => x.id === id)
+    if (!p) return { ok: false, message: '이미 처리했어요' }
+    if (keep) {
+      const folder = store.get().settings.study?.folder || ''
+      if (!folder) return { ok: false, message: '설정에서 과목 자료 폴더(exam-study)를 연결해야 메모리/학습노트.md 에 저장돼요' }
+      const w = memory.appendLearned(folder, [String(text || p.text)], A.ymd(new Date()))
+      if (!w.ok) return w
+    }
+    store.update((x) => (x.learnProposals = (x.learnProposals || []).filter((y) => y.id !== id)))
+    broadcast()
+    return { ok: true, message: keep ? '메모리/학습노트.md 에 기억했어요' : '버렸어요' }
   })
   // 위젯 메모: Windows 고정 위젯은 평소 키보드 포커스를 받지 않는다 → 메모를 누를 때만 잠시 받게
   ipcMain.handle('nf:widget:focus', (e, on) => {

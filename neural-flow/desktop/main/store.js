@@ -114,6 +114,8 @@ function emptyData() {
     memoCandidates: [], // AI 가 정리한 일정·할 일 후보 (수락 전)
     memoQuestions: [],
     plans: [], // 수락한 일 + 쪼갠 개념 트리
+    signals: [], // 행동 기록 (조각 완료·수락 때 고친 것·버린 후보) — 배운 점의 근거
+    learnProposals: [], // AI 가 제안한 배운 점 (승인 전)
     inbox: [],
     lastRun: {},
   }

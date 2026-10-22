@@ -17,8 +17,13 @@ process.stdin.on('end', () => {
       /3시/.test(text)
         ? { title: text.replace('내일 3시 ', ''), date: t.toISOString().slice(0, 10), start: '15:00', minutes: 60, course: '', note: '', lines: [Number(n)] }
         : { title: text, date: null, start: null, minutes: null, course: /GC/.test(text) ? '교통정책론' : '', note: '', lines: [Number(n)] })
+    const vision = input.includes('[비전·진로]') && input.includes('AI PM') ? 'AI PM' : ''
+    const learned = input.includes('15분 이하로 쪼갠다')
+    for (const it of items) Object.assign(it, { approach: learned ? '배운 점대로 15분 조각' : '예제부터', fit: vision ? '높음' : '', fitWhy: vision ? '모빌리티 PM 근거' : '', gain: '계산 감각', vision, next: '공식 한 번 쓰기' })
     items.push({ title: 'CLAUDE 가 지어낸 일', date: null, start: null, lines: [99] })
     body = { items, questions: ['팀플 장소는 어디예요?'] }
+  } else if (input.includes('일하는 방식을 관찰해 개선점을 찾는 코치')) {
+    body = { notes: [{ text: '과목 조각은 15분 이하로 쪼갠다', why: input.includes('21~25분') ? '25분 조각 완료율이 낮음' : '기록' }, { text: '버린 메모 유형은 일정으로 만들지 않는다', why: '버린 후보 1개' }] }
   } else if (input.includes('아주 작은 단위로 쪼개는 코치')) {
     const ids = [...input.matchAll(/"id":"([^"]+)"/g)].map((m) => m[1])
     body = { plans: ids.map((id) => ({ id, concepts: [{ title: '개념 A', steps: [{ title: '공식 외우기', minutes: 10 }, { title: '예제 1 손으로 풀기', minutes: 40 }] }, { title: '개념 B', steps: [{ title: '예시 1줄 쓰기', minutes: 2 }] }] })).concat([{ id: 'unknown', concepts: [{ title: 'x', steps: [{ title: 'y', minutes: 10 }] }] }]) }
