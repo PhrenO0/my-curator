@@ -516,7 +516,7 @@ exports.run = async ({ app, store, getWidget, openManager, getManager, setWidget
     const r2 = await js(`nf.decideCandidate(${JSON.stringify(c2.id)}, 'accept', { title: 'GC 계산 다시 보기 (수정)' })`)
     const r3 = await js(`nf.decideCandidate(${JSON.stringify(c3.id)}, 'drop')`)
     s = await snap()
-    check('수락: 일정은 캘린더로, 할 일은 앱으로 · 버림은 저장 안 함', r.ok && r2.ok && r3.ok && s.activities.some((a) => a.name === 'GC 계산 다시 보기 (수정)') && s.plans.length >= 2 && !s.memoCandidates.length, `${r.message} / ${r2.message}`)
+    check('수락: 일정은 캘린더로, 할 일은 앱으로 · 버림은 저장 안 함', r.ok && r2.ok && r3.ok && s.activities.some((a) => a.name === '[교통정책론] GC 계산 다시 보기 (수정)') && s.plans.length >= 2 && !s.memoCandidates.length, `${r.message} / ${r2.message}`)
     check('메모 줄에 ✓(수락)·✗(버림) 표시', /^✓ 내일 3시 팀플 회의$/m.test(s.memo.text) && /^✓ 교통 GC 계산 다시 보기$/m.test(s.memo.text) && /^✗ 그냥 생각: 날씨 좋다$/m.test(s.memo.text), s.memo.text)
     org = await js('nf.organizeMemo()')
     check('처리한 줄만 남으면 AI 를 부르지 않음', org.ok === false && /새 메모가 없어요/.test(org.message), org.message)
