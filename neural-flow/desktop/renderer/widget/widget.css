@@ -792,3 +792,5 @@ body.privacy .plans .st {
 .step.next .st b {
   color: var(--accent);
 }
+
+.plan-h .late { color: var(--danger, #f04452); font-weight: 600; }

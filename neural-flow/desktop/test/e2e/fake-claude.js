@@ -24,6 +24,28 @@ process.stdin.on('end', () => {
     body = { items, questions: ['팀플 장소는 어디예요?'] }
   } else if (input.includes('일하는 방식을 관찰해 개선점을 찾는 코치')) {
     body = { notes: [{ text: '과목 조각은 15분 이하로 쪼갠다', why: input.includes('21~25분') ? '25분 조각 완료율이 낮음' : '기록' }, { text: '버린 메모 유형은 일정으로 만들지 않는다', why: '버린 후보 1개' }] }
+  } else if (input.includes('거꾸로 설계하는 코치')) {
+    // 지난 날짜에서 시작하는 단계(오늘로 잘려야 함) · 목표일을 넘는 단계(목표일로) · 형식 오류 단계(제외)
+    const today = (input.match(/오늘 (\d{4}-\d{2}-\d{2})부터/) || [])[1]
+    const target = (input.match(/\((\d{4}-\d{2}-\d{2}), 오늘/) || [])[1]
+    const add = (d, n) => { const t = new Date(d + 'T12:00:00'); t.setDate(t.getDate() + n); return t.toISOString().slice(0, 10) }
+    const src = (/\[주차 노트 일부\]\n### (\S+)/.exec(input) || [])[1] || ''
+    const replan = input.includes('[지난 로드맵]') && input.includes('"done":["GC 공식 3번 손으로"')
+    body = {
+      summary: replan ? 'REPLAN: 끝낸 것 빼고 다시' : 'CLAUDE 로드맵: 1순위부터 거꾸로',
+      stages: [
+        { title: replan ? '밀린 1순위' : '1순위 GC·Hansen', start: add(today, -10), end: add(today, 5), goal: '계산 문제를 혼자 푼다', concepts: [{ title: 'GC 계산', steps: [{ title: 'GC 공식 3번 손으로', minutes: 15, src }, { title: '숫자 바꿔 예제', minutes: 40 }] }] },
+        { title: '2순위 이론 비교', start: add(today, 6), end: add(today, 20), goal: '이론표', concepts: [{ title: 'TPB', steps: [{ title: '비교표 그리기', minutes: 20 }] }] },
+        { title: '총정리', start: add(today, 21), end: add(target, 5), goal: '인출', concepts: [{ title: '인출', steps: [{ title: '백지 복습', minutes: 25 }] }] },
+        { title: '형식 오류', start: '언젠가', end: add(today, 3), concepts: [{ title: 'x', steps: [{ title: 'y', minutes: 10 }] }] },
+      ],
+      questions: ['기말 형식은 확인됐나요?'],
+    }
+  } else if (input.includes('공부 일정 코치')) {
+    const today = (input.match(/오늘 (\d{4}-\d{2}-\d{2})/) || [])[1]
+    const t = new Date(today + 'T12:00:00'); t.setDate(t.getDate() + 3)
+    const piece = (/"조각":"([^"]+)"/.exec(input) || [])[1] || '공부'
+    body = { summary: 'CLAUDE: 로드맵 조각 배치', items: [{ title: `[교통정책론] ${piece}`, date: t.toISOString().slice(0, 10), start: '20:30', minutes: 45, note: piece }], questions: [] }
   } else if (input.includes('아주 작은 단위로 쪼개는 코치')) {
     const ids = [...input.matchAll(/"id":"([^"]+)"/g)].map((m) => m[1])
     const src = (/\[주차 노트\]\n### (\S+)/.exec(input) || [])[1] || ''

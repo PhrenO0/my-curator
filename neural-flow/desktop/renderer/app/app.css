@@ -1745,3 +1745,42 @@ code {
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* ── 공부 로드맵 ── */
+.rm-form { display: grid; grid-template-columns: 1.4fr 1fr 1fr 0.7fr; gap: 8px; margin-bottom: 10px; }
+.rm-form label { display: grid; gap: 4px; font-size: 12px; color: var(--text-3); }
+@media (max-width: 760px) { .rm-form { grid-template-columns: 1fr 1fr; } }
+.rm { border-left: 3px solid var(--hue, var(--accent)); }
+.rm-line { position: relative; height: 34px; margin: 10px 0 6px; }
+.rm-line::before { content: ''; position: absolute; left: 0; right: 0; top: 8px; height: 10px; border-radius: 999px; background: var(--panel-2); }
+.rm-seg { position: absolute; top: 8px; height: 10px; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--hue, var(--accent)) 30%, transparent); box-shadow: inset -2px 0 0 var(--panel); }
+.rm-seg i { display: block; height: 100%; background: var(--hue, var(--accent)); }
+.rm-seg.current { outline: 2px solid var(--hue, var(--accent)); outline-offset: 1px; }
+.rm-seg.behind { background: color-mix(in srgb, var(--danger) 35%, transparent); }
+.rm-seg.behind i { background: var(--danger); }
+.rm-today, .rm-goal { position: absolute; top: 21px; font-size: 11px; color: var(--text-3); }
+.rm-today { left: 0; }
+.rm-goal { right: 0; }
+.rm-stage { border-top: 1px solid var(--line, rgba(127, 127, 127, 0.18)); padding: 6px 0; }
+.rm-stage summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 4px 0; }
+.rm-stage summary::-webkit-details-marker { display: none; }
+.rm-stage summary::before { content: '▸'; color: var(--text-3); }
+.rm-stage[open] summary::before { content: '▾'; }
+.rm-stage .rs-t { font-weight: 600; }
+.rm-stage summary .muted { margin-left: auto; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--panel-2); color: var(--text-2, inherit); }
+.badge.cur { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.badge.bad { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
+.badge.warn { background: color-mix(in srgb, #e3a33b 22%, transparent); color: #e3a33b; }
+.warn-t { color: #e3a33b; margin: 2px 0; }
+.rm-load { display: grid; gap: 6px; }
+.rl-row { display: grid; grid-template-columns: 52px 1fr 44px; align-items: center; gap: 8px; font-size: 12px; }
+.rl-w { color: var(--text-3); }
+.rl-bar { position: relative; display: flex; height: 12px; border-radius: 4px; background: var(--panel-2); overflow: visible; }
+.rl-bar i { display: block; height: 100%; }
+.rl-bar i:first-child { border-radius: 4px 0 0 4px; }
+.rl-cap { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text-3); opacity: 0.7; }
+.rl-n { text-align: right; color: var(--text-3); }
+.rl-n.over { color: var(--danger); font-weight: 600; }
+.rl-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--text-3); }
+.rl-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
