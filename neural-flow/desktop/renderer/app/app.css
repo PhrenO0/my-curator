@@ -1646,6 +1646,19 @@ code {
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
+.t-step .t-src {
+  flex: none;
+  max-width: 40%;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .t-step em {
   flex: none;
   font-style: normal;

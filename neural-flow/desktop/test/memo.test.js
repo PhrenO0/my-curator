@@ -86,3 +86,22 @@ test('쪼개기: 조각 5~25분으로 고정, 개수 상한, 모르는 id·빈 �
   assert.equal((await memo.breakdown({ plans, llm: { provider: 'none' }, call })).ok, false)
   assert.equal((await memo.breakdown({ plans: [], llm: claude, call })).ok, false)
 })
+
+test('쪼개기: 주차 노트를 프롬프트에 싣고, 넘긴 노트만 src 로 인정', async () => {
+  let prompt = ''
+  const call = async (_llm, p) => {
+    prompt = p
+    return { plans: [{ id: 'p1', concepts: [{ title: 'Hansen', steps: [{ title: '예제 풀기', minutes: 10, src: '주차/05주차.md' }, { title: '지어낸 근거', minutes: 10, src: '주차/99주차.md' }] }] }] }
+  }
+  const r = await memo.breakdown({
+    plans: [{ id: 'p1', title: '[교통정책론] Hansen 다시 보기', course: '교통정책론' }],
+    notesFor: () => [{ course: '교통정책론', file: '주차/05주차.md', title: '5주차 접근성', text: 'Hansen 식 저항함수' }],
+    llm: claude,
+    call,
+  })
+  assert.match(prompt, /\[주차 노트\]\n### 주차\/05주차\.md · 교통정책론 — 5주차 접근성\nHansen 식 저항함수/)
+  assert.match(prompt, /"notes":\["주차\/05주차\.md"\]/)
+  const steps = r.trees.p1.concepts[0].steps
+  assert.equal(steps[0].src, '주차/05주차.md')
+  assert.equal(steps[1].src, undefined)
+})

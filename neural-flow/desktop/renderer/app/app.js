@@ -817,7 +817,7 @@ function planTree(p) {
             .map(
               (c, ci) => `<li><span class="t-concept">${esc(c.title)}</span><ul class="t-steps">${c.steps
                 .map(
-                  (st, si) => `<li><button class="t-step ${st.done ? 'done' : ''}" data-act="plan-step" data-plan="${esc(p.id)}" data-ci="${ci}" data-si="${si}"><span class="box">${st.done ? icon('check', 11) : ''}</span><span>${esc(st.title)}</span><em>${st.minutes}분</em></button></li>`
+                  (st, si) => `<li><button class="t-step ${st.done ? 'done' : ''}" data-act="plan-step" data-plan="${esc(p.id)}" data-ci="${ci}" data-si="${si}"><span class="box">${st.done ? icon('check', 11) : ''}</span><span>${esc(st.title)}</span>${st.src ? `<small class="t-src" title="${esc(st.src)}">📄 ${esc(st.src.replace(/^.*\//, '').replace(/\.md$/i, ''))}</small>` : ''}<em>${st.minutes}분</em></button></li>`
                 )
                 .join('')}</ul></li>`
             )

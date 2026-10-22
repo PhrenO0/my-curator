@@ -795,7 +795,7 @@ function registerIpc() {
     store.update((x) => {
       x.memoCandidates = x.memoCandidates.filter((y) => y.id !== id)
       x.memo = { ...x.memo, text: memo.markLines(x.memo.text, c.lines, memo.MARK_DONE) }
-      x.plans = [...(x.plans || []), { id: uid(), title, course: v.course, kind: v.kind, date: v.date, start: v.start, minutes: v.minutes, note: v.note, approach: v.approach, fit: v.fit, fitWhy: v.fitWhy, gain: v.gain, vision: v.vision, next: v.next, createdAt: new Date().toISOString(), tree: null }].slice(-50)
+      x.plans = [...(x.plans || []), { id: uid(), title, course: v.course, kind: v.kind, date: v.date, start: v.start, minutes: v.minutes, note: v.note, approach: v.approach, fit: v.fit, fitWhy: v.fitWhy, gain: v.gain, vision: v.vision, next: v.next, lines: v.lines, createdAt: new Date().toISOString(), tree: null }].slice(-50)
     })
     broadcast()
     return { ok: true, message: v.kind === 'event' ? '구글 캘린더(또는 앱 일정)에 넣었어요' : '앱 할 일에 넣었어요' }
@@ -806,7 +806,13 @@ function registerIpc() {
     const plans = (d.plans || []).filter((p) => want.includes(p.id))
     const loaded = loadStudy()
     const today = A.ymd(new Date())
-    const r = await memo.breakdown({ plans, contextFor: (course) => (loaded.ok ? courses.buildContext(loaded, { course, today, maxChars: 6000 }) : ''), memory: memCtx(), llm: llmClaudeFirst() })
+    const r = await memo.breakdown({
+      plans,
+      contextFor: (course) => (loaded.ok ? courses.buildContext(loaded, { course, today, maxChars: 6000 }) : ''),
+      notesFor: (p) => (loaded.ok && p.course ? courses.pickNotes(loaded, p.course, [p.title, p.note, p.approach, ...(p.lines || [])].join(' '), { max: 3, maxChars: 6000 }) : []),
+      memory: memCtx(),
+      llm: llmClaudeFirst(),
+    })
     if (r.ok) store.update((x) => {
       for (const p of x.plans || []) if (r.trees[p.id]) p.tree = r.trees[p.id]
     })

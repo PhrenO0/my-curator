@@ -26,7 +26,8 @@ process.stdin.on('end', () => {
     body = { notes: [{ text: '과목 조각은 15분 이하로 쪼갠다', why: input.includes('21~25분') ? '25분 조각 완료율이 낮음' : '기록' }, { text: '버린 메모 유형은 일정으로 만들지 않는다', why: '버린 후보 1개' }] }
   } else if (input.includes('아주 작은 단위로 쪼개는 코치')) {
     const ids = [...input.matchAll(/"id":"([^"]+)"/g)].map((m) => m[1])
-    body = { plans: ids.map((id) => ({ id, concepts: [{ title: '개념 A', steps: [{ title: '공식 외우기', minutes: 10 }, { title: '예제 1 손으로 풀기', minutes: 40 }] }, { title: '개념 B', steps: [{ title: '예시 1줄 쓰기', minutes: 2 }] }] })).concat([{ id: 'unknown', concepts: [{ title: 'x', steps: [{ title: 'y', minutes: 10 }] }] }]) }
+    const src = (/\[주차 노트\]\n### (\S+)/.exec(input) || [])[1] || ''
+    body = { plans: ids.map((id) => ({ id, concepts: [{ title: '개념 A', steps: [{ title: '공식 외우기', minutes: 10, src }, { title: '예제 1 손으로 풀기', minutes: 40 }] }, { title: '개념 B', steps: [{ title: '예시 1줄 쓰기', minutes: 2 }] }] })).concat([{ id: 'unknown', concepts: [{ title: 'x', steps: [{ title: 'y', minutes: 10 }] }] }]) }
   } else if (input.includes('붙여넣은 공문')) {
     body = { title: 'CLAUDE: AI 설명회', date: '2026-10-12', start: '20:00', minutes: 90, location: '온라인', link: null, summary: '무료 설명회', domain: '' }
   } else if (input.includes('새 일정 후보')) {
