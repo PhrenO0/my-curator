@@ -116,6 +116,8 @@ function emptyData() {
     plans: [], // 수락한 일 + 쪼갠 개념 트리
     signals: [], // 행동 기록 (조각 완료·수락 때 고친 것·버린 후보) — 배운 점의 근거
     learnProposals: [], // AI 가 제안한 배운 점 (승인 전)
+    roadmaps: [], // 승인한 과목별 학기 로드맵 (목표 → 단계 → 개념 → 조각)
+    roadmapDraft: null, // AI 가 제안한 로드맵 (승인 전)
     inbox: [],
     lastRun: {},
   }

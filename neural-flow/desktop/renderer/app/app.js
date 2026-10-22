@@ -25,6 +25,7 @@ const NAV = [
   ['today', '오늘', 'sun'],
   ['calendar', '캘린더', 'calendar-days'],
   ['memo', '메모·쪼개기', 'sticky-note'],
+  ['roadmap', '공부 로드맵', 'map'],
   ['settings', '설정', 'settings'],
 ]
 
@@ -37,7 +38,7 @@ if (navigator.userAgent.includes('Mac')) document.body.classList.add('mac')
 
 async function refresh() {
   S = await nf.snapshot()
-  if (route === 'memo' && !S.locked) memInfo = await nf.getMemory().catch(() => null)
+  if ((route === 'memo' || route === 'roadmap') && !S.locked) memInfo = await nf.getMemory().catch(() => null)
   if (S.settings.study?.folder && (!studyInfo || studyInfo.folder !== S.settings.study.folder)) await loadStudy()
   else if (!S.settings.study?.folder && studyInfo) studyInfo = null
   if (!cal) {
@@ -300,7 +301,7 @@ $askInput.addEventListener('keydown', (e) => {
 function renderSide() {
   const open = S.activities.filter((a) => a.status === '제안됨').length
   const todayCount = occ(S.today, S.today).length
-  const counts = { today: todayCount || '', board: open ? `${open} 제안` : '', memo: (S.memoCandidates || []).length || '' }
+  const counts = { today: todayCount || '', board: open ? `${open} 제안` : '', memo: (S.memoCandidates || []).length || '', roadmap: S.roadmapDraft ? '제안' : (() => { const n = (S.roadmaps || []).reduce((k, r) => k + r.stages.filter((st) => st.info?.behind).length, 0); return n ? `밀림 ${n}` : '' })() }
   const k = S.settings
   $side.innerHTML = `
     <div class="brand"><span class="brand-mark">${icon('waves', 15)}</span>neural-flow</div>
@@ -841,7 +842,138 @@ document.addEventListener('focusout', (e) => {
   if (e.target.id === 'memo-text' && memoTimer) saveMemoNow()
 })
 
-const VIEWS = { today: viewToday, calendar: viewCalendar, memo: viewMemo, settings: viewSettings }
+// ── 공부 로드맵: 목표에서 거꾸로 (과목 → 단계 → 개념 → 조각) ──
+const COURSE_HUES = ['#5b8def', '#e3a33b', '#4fb37a', '#d4697a', '#9b7be0', '#3fb6c4', '#c98a5a', '#7f8c99']
+const rmForm = { course: '', label: '기말고사', date: '', hours: 6 }
+function courseHue(name) {
+  const list = (studyInfo?.courses || []).map((c) => c.name)
+  const i = list.indexOf(name)
+  return COURSE_HUES[(i >= 0 ? i : [...name].reduce((n, ch) => n + ch.charCodeAt(0), 0)) % COURSE_HUES.length]
+}
+function rmStepButtons(rmId, st, act = 'rm-step') {
+  return `<ul class="t-concepts">${st.concepts
+    .map(
+      (c, ci) => `<li><span class="t-concept">${esc(c.title)}</span><ul class="t-steps">${c.steps
+        .map((x, si) =>
+          act
+            ? `<li><button class="t-step ${x.done ? 'done' : ''}" data-act="${act}" data-rm="${esc(rmId)}" data-stage="${esc(st.id)}" data-ci="${ci}" data-si="${si}"><span class="box">${x.done ? icon('check', 11) : ''}</span><span>${esc(x.title)}</span>${x.src ? `<small class="t-src" title="${esc(x.src)}">📄 ${esc(x.src.replace(/^.*\//, '').replace(/\.md$/i, ''))}</small>` : ''}<em>${x.minutes}분</em></button></li>`
+            : `<li><div class="t-step"><span>${esc(x.title)}</span>${x.src ? `<small class="t-src" title="${esc(x.src)}">📄 ${esc(x.src.replace(/^.*\//, '').replace(/\.md$/i, ''))}</small>` : ''}<em>${x.minutes}분</em></div></li>`
+        )
+        .join('')}</ul></li>`
+    )
+    .join('')}</ul>`
+}
+// 오늘 → 목표일 가로 막대 위에 단계를 날짜 비율로 놓는다
+function rmTimeline(rm) {
+  const span = Math.max(1, A.diffDays(S.today, rm.target.date))
+  const pos = (d) => Math.min(100, Math.max(0, (A.diffDays(S.today, d) / span) * 100))
+  return `<div class="rm-line" aria-hidden="true">
+    ${rm.stages
+      .map((st) => {
+        const info = st.info || {}
+        const left = pos(st.start)
+        const width = Math.max(1.5, pos(A.addDays(st.end, 1)) - left)
+        const pct = info.total ? Math.round((info.done / info.total) * 100) : 0
+        return `<span class="rm-seg ${info.behind ? 'behind' : info.current ? 'current' : ''}" style="left:${left}%;width:${width}%" title="${esc(st.title)} ${esc(st.start)}~${esc(st.end)}"><i style="width:${pct}%"></i></span>`
+      })
+      .join('')}
+    <span class="rm-today">오늘</span><span class="rm-goal">🏁 ${esc(rm.target.label)} ${esc(rm.target.date.slice(5).replace('-', '/'))}</span>
+  </div>`
+}
+function rmStage(rm, st, open) {
+  const info = st.info || {}
+  const badges = [info.current ? '<span class="badge cur">지금</span>' : '', info.behind ? '<span class="badge bad">밀림</span>' : '', info.overload ? `<span class="badge warn">주 ${Math.round(info.perWeek / 60)}시간</span>` : ''].join('')
+  return `<details class="rm-stage" ${open ? 'open' : ''}><summary><span class="rs-t">${esc(st.title)}</span>${badges}<span class="muted small">${esc(st.start.slice(5).replace('-', '/'))}~${esc(st.end.slice(5).replace('-', '/'))} · ${info.done ?? 0}/${info.total ?? 0}</span></summary>
+    ${st.goal ? `<p class="muted small">이 단계가 끝나면: ${esc(st.goal)}</p>` : ''}${rmStepButtons(rm.id, st)}</details>`
+}
+// 비전 첫 줄 ("- 목표: AI PM / PO" → "AI PM / PO")
+function visionShort() {
+  const line = String(memInfo?.vision || '').split(/\r?\n/).find((l) => l.trim()) || ''
+  return line.replace(/^\s*[-*]\s*/, '').replace(/^[^:：]{1,10}[:：]\s*/, '').slice(0, 40)
+}
+function rmNext(rm) {
+  for (const st of rm.stages) for (const c of st.concepts) for (const x of c.steps) if (!x.done) return `${x.title} (${x.minutes}분)`
+  return ''
+}
+function rmLoad() {
+  const rows = S.roadmapLoad || []
+  const rms = S.roadmaps || []
+  if (!rms.length || !rows.some((r) => r.total)) return ''
+  const cap = rms.reduce((n, r) => n + (r.hoursPerWeek || 0) * 60, 0)
+  const max = Math.max(cap, ...rows.map((r) => r.total), 60)
+  return `<section class="card"><h2>${icon('calendar-days', 16)}<span class="grow">과목별 주간 부하</span><span class="muted small">계획 합 주 ${Math.round(cap / 60)}시간</span></h2>
+    <div class="rm-load">${rows
+      .map(
+        (r) => `<div class="rl-row"><span class="rl-w">${esc(r.start.slice(5).replace('-', '/'))}~</span><span class="rl-bar">${Object.entries(r.byCourse)
+          .map(([c, m]) => `<i style="width:${(m / max) * 100}%;background:${courseHue(c)}" title="${esc(c)} ${Math.round(m / 6) / 10}시간"></i>`)
+          .join('')}${cap ? `<b class="rl-cap" style="left:${(cap / max) * 100}%"></b>` : ''}</span><span class="rl-n ${cap && r.total > cap * 1.1 ? 'over' : ''}">${Math.round(r.total / 6) / 10}h</span></div>`
+      )
+      .join('')}</div>
+    <div class="rl-legend">${rms.map((r) => `<span><i style="background:${courseHue(r.course)}"></i>${esc(r.course)}</span>`).join('')}</div>
+  </section>`
+}
+function viewRoadmap() {
+  const courses = studyInfo?.ok ? studyInfo.courses : []
+  const busy = !!S.busy.roadmap
+  if (!rmForm.course && courses.length) rmForm.course = courses[0].name
+  const exam = courses.find((c) => c.name === rmForm.course)?.exam
+  const date = rmForm.date || (exam && exam.date > S.today ? exam.date : '')
+  const dr = S.roadmapDraft
+  const form = !studyInfo?.ok
+    ? `<p class="muted">설정 → <b>과목 자료 연계</b>에서 Cowork가 정리한 폴더(exam-study)를 먼저 연결해 주세요.</p>`
+    : `<div class="rm-form">
+        <label>과목<select class="input" id="rm-course">${courses.map((c) => `<option ${c.name === rmForm.course ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label>목표<input class="input" id="rm-label" value="${esc(rmForm.label)}" /></label>
+        <label>날짜<input class="input" type="date" id="rm-date" value="${esc(date)}" /></label>
+        <label>주당 시간<input class="input" type="number" min="1" max="40" id="rm-hours" value="${esc(rmForm.hours)}" /></label>
+      </div>
+      <div class="btn-row"><button class="btn primary" data-act="rm-propose" ${busy ? 'disabled' : ''}>${busy ? '설계하는 중…' : '로드맵 제안'}</button>
+      <span class="muted small">시험 전략·주차 노트·기억을 보고 목표일에서 거꾸로 단계를 나눠요. 시험전략.md에 기말 날짜가 없으면 직접 넣어 주세요.</span></div>`
+  const draft = dr
+    ? `<section class="card rm-draft"><h2>${icon('sparkles', 16)}<span class="grow">제안: ${esc(dr.course)} · ${esc(dr.target.label)} ${esc(ddayText({ dday: A.diffDays(S.today, dr.target.date) }))}${dr.replan ? ' (다시 배분)' : ''}</span></h2>
+        ${dr.summary ? `<p>${esc(dr.summary)}</p>` : ''}
+        ${(dr.questions || []).map((q) => `<p class="muted small">확인: ${esc(q)}</p>`).join('')}
+        ${(dr.warnings || []).map((w) => `<p class="small warn-t">${esc(w)}</p>`).join('')}
+        ${rmTimeline({ ...dr, stages: dr.stages.map((st) => ({ ...st, info: {} })) })}
+        ${dr.stages
+          .map(
+            (st) => `<details class="rm-stage"><summary><span class="rs-t">${esc(st.title)}</span><span class="muted small">${esc(st.start.slice(5).replace('-', '/'))}~${esc(st.end.slice(5).replace('-', '/'))} · 조각 ${st.concepts.reduce((n, c) => n + c.steps.length, 0)}개 · ${st.concepts.reduce((n, c) => n + c.steps.reduce((m, x) => m + x.minutes, 0), 0)}분</span>
+              <button class="icon-btn" data-act="rm-draft-drop" data-id="${esc(st.id)}" title="이 단계 빼기">${icon('x', 13)}</button></summary>
+              ${st.goal ? `<p class="muted small">이 단계가 끝나면: ${esc(st.goal)}</p>` : ''}${rmStepButtons('', st, '')}</details>`
+          )
+          .join('')}
+        <div class="btn-row"><button class="btn primary" data-act="rm-approve">승인해서 저장</button><button class="btn ghost" data-act="rm-discard">버리기</button>
+        <span class="muted small">빼고 싶은 단계는 ✕로 지운 뒤 승인하세요. 캘린더에는 아직 아무것도 안 들어가요.</span></div>
+      </section>`
+    : ''
+  const list = (S.roadmaps || [])
+    .map((rm) => {
+      const pr = rm.progress || { done: 0, total: 0, minutes: 0 }
+      const behind = rm.stages.some((st) => st.info?.behind)
+      const firstOpen = rm.stages.findIndex((st) => st.info?.behind || st.info?.current)
+      return `<section class="card rm" style="--hue:${courseHue(rm.course)}">
+        <div class="tree-h"><span class="tt">📚 ${esc(rm.course)} · ${esc(rm.target.label)} <b>${esc(ddayText({ dday: A.diffDays(S.today, rm.target.date) }))}</b></span>${pbar(pr)}<span class="pn">${pr.done}/${pr.total}</span>
+          <button class="icon-btn" data-act="rm-remove" data-id="${esc(rm.id)}" title="로드맵 지우기">${icon('x', 13)}</button></div>
+        ${chain(visionShort(), `${rm.course} ${rm.target.label}`, rmNext(rm))}
+        ${rm.summary ? `<p class="muted small">${esc(rm.summary)}</p>` : ''}
+        ${rmTimeline(rm)}
+        <div class="btn-row"><button class="btn sm primary" data-act="rm-week" data-id="${esc(rm.id)}" ${S.busy.coach ? 'disabled' : ''}>이번 주 캘린더에 배치</button>
+          <button class="btn sm ${behind ? 'primary' : ''}" data-act="rm-replan" data-id="${esc(rm.id)}" ${busy ? 'disabled' : ''}>${behind ? '밀렸어요 — 다시 배분' : '다시 배분'}</button>
+          <span class="muted small">남은 조각 ${Math.round(pr.minutes / 6) / 10}시간 · 주 ${rm.hoursPerWeek}시간 계획</span></div>
+        ${rm.stages.map((st, i) => rmStage(rm, st, i === (firstOpen >= 0 ? firstOpen : 0))).join('')}
+      </section>`
+    })
+    .join('')
+  return `<div class="page-h"><div class="titles"><div class="eyebrow">목표에서 거꾸로 · 단계 → 개념 → 조각</div><h1>공부 로드맵</h1></div></div>
+  <div class="stack">
+    <section class="card"><h2>${icon('map', 16)}로드맵 제안</h2>${form}</section>
+    ${draft}
+    ${rmLoad()}
+    ${list || (dr ? '' : '<p class="muted">과목과 목표 날짜를 정하고 [로드맵 제안]을 누르면, 승인한 로드맵이 여기에 쌓여요.</p>')}
+  </div>`
+}
+
+const VIEWS = { today: viewToday, calendar: viewCalendar, memo: viewMemo, roadmap: viewRoadmap, settings: viewSettings }
 
 function render() {
   if (!S) return
@@ -995,6 +1127,40 @@ document.addEventListener('click', async (e) => {
     }
     case 'plan-remove':
       return nf.removePlan(d.id)
+    case 'rm-propose': {
+      rmForm.course = document.getElementById('rm-course')?.value || rmForm.course
+      rmForm.label = document.getElementById('rm-label')?.value.trim() || '기말고사'
+      rmForm.date = document.getElementById('rm-date')?.value || ''
+      rmForm.hours = Number(document.getElementById('rm-hours')?.value) || 6
+      if (!rmForm.date) return toast('목표 날짜를 넣어 주세요')
+      const r = await nf.proposeRoadmap({ course: rmForm.course, label: rmForm.label, date: rmForm.date, hoursPerWeek: rmForm.hours })
+      return toast(r?.ok ? `단계 ${r.stages}개를 제안했어요 — 확인 후 승인하세요` : r?.message || '로드맵을 만들지 못했어요')
+    }
+    case 'rm-replan': {
+      const r = await nf.proposeRoadmap({ replanId: d.id })
+      return toast(r?.ok ? '남은 조각을 다시 배분했어요 — 확인 후 승인하세요' : r?.message || '다시 배분하지 못했어요')
+    }
+    case 'rm-draft-drop':
+      return nf.dropDraftStage(d.id)
+    case 'rm-approve':
+    case 'rm-discard': {
+      const r = await nf.decideRoadmap(act === 'rm-approve')
+      return toast(r?.message || '')
+    }
+    case 'rm-step':
+      return nf.toggleRoadmapStep(d.rm, d.stage, Number(d.ci), Number(d.si))
+    case 'rm-remove':
+      if (!confirm('이 로드맵을 지울까요? (캘린더 일정은 그대로)')) return
+      return nf.removeRoadmap(d.id)
+    case 'rm-week': {
+      const r = await nf.placeRoadmapWeek(d.id)
+      if (!r?.ok) return toast(r?.message || '배치하지 못했어요')
+      askItem = { ...r.item, _text: '' }
+      $scroll.scrollTop = 0
+      renderAskPreview()
+      reportDraft()
+      return toast('이번 주 배치안이 맨 위에 떴어요 — 고친 뒤 [확인한 내용 저장]을 누르세요')
+    }
     case 'study-plan': {
       const r = await nf.planStudy({ course: studyCourse, days: 7 })
       if (!r?.ok) return toast(r?.message || '공부 일정을 제안하지 못했어요')
@@ -1148,6 +1314,13 @@ document.addEventListener('dblclick', (e) => {
 })
 
 // 설정 입력 → 자동 저장
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'rm-course') return
+  rmForm.course = e.target.value
+  rmForm.date = ''
+  e.target.blur()
+  render()
+})
 document.addEventListener('change', async (e) => {
   const el = e.target.closest('[data-set]')
   if (!el || el.tagName === 'BUTTON') return

@@ -54,6 +54,33 @@ function plansCard() {
   </section>`
 }
 
+// 공부 로드맵: 과목마다 목표 D-day · 진행 · 바로 다음 조각 하나
+function roadmapCard() {
+  const rms = (S.roadmaps || []).filter((r) => r.progress.done < r.progress.total)
+  if (!rms.length) return ''
+  return `<section class="card plans">
+    <div class="card-h">${icon('map', 13)}<span class="grow">공부 로드맵</span>
+      <button class="icon-btn" data-act="open" data-view="roadmap" title="로드맵 전체 보기">${icon('external-link', 13)}</button></div>
+    ${rms
+      .slice(0, 4)
+      .map((r) => {
+        let next = null
+        for (const st of r.stages) {
+          st.concepts.forEach((c, ci) => c.steps.forEach((x, si) => !next && !x.done && (next = { st, x, ci, si })))
+          if (next) break
+        }
+        const pct = r.progress.total ? Math.round((r.progress.done / r.progress.total) * 100) : 0
+        const n = A.diffDays(S.today, r.target.date)
+        const behind = r.stages.some((st) => st.info?.behind)
+        return `<div class="plan">
+          <div class="plan-h"><span class="pt">${esc(r.course)} · ${esc(r.target.label)} ${n > 0 ? `D-${n}` : 'D-day'}${behind ? ' <b class="late">밀림</b>' : ''}</span><span class="pbar"><i style="width:${pct}%"></i></span><span class="pn">${pct}%</span></div>
+          ${next ? `<button class="step next" data-act="rm-step" data-rm="${esc(r.id)}" data-stage="${esc(next.st.id)}" data-ci="${next.ci}" data-si="${next.si}"><span class="box"></span><span class="st"><b>▶ 다음</b> ${esc(next.x.title)}</span><span class="sm">${next.x.minutes}분</span></button>` : ''}
+        </div>`
+      })
+      .join('')}
+  </section>`
+}
+
 // ── 메모장 ──
 const $memo = document.getElementById('memo')
 const $memoWrap = document.getElementById('memo-wrap')
@@ -235,6 +262,7 @@ function render() {
       : '') +
     clockCard()
   root.innerHTML =
+    roadmapCard() +
     plansCard() +
     (sec.showCalendar !== false ? calendarCard(occ, dayItems) : '')
 
@@ -253,6 +281,7 @@ document.getElementById('wrap').addEventListener('click', async (e) => {
   }
   if (act === 'open') return nf.open(el.dataset.view)
   if (act === 'step') return nf.togglePlanStep(el.dataset.plan, Number(el.dataset.ci), Number(el.dataset.si))
+  if (act === 'rm-step') return nf.toggleRoadmapStep(el.dataset.rm, el.dataset.stage, Number(el.dataset.ci), Number(el.dataset.si))
   if (act === 'link') return nf.openLink(el.dataset.url)
   if (act === 'say') return speak(el.dataset.text)
   if (act === 'pin') return nf.setWidgetMode('pinned')

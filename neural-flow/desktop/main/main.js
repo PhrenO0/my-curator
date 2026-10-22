@@ -37,6 +37,7 @@ const { detectCodex } = require('./codex.js')
 const scheduleCoach = require('./schedule-coach.js')
 const courses = require('./courses.js')
 const studyPlan = require('./study-plan.js')
+const roadmap = require('./roadmap.js')
 const memo = require('./memo.js')
 const memory = require('./memory.js')
 const { pinToDesktop } = require('./win-desktop.js')
@@ -224,6 +225,9 @@ function snapshot() {
     memoQuestions: d.memoQuestions || [],
     learnProposals: d.learnProposals || [],
     plans: (d.plans || []).map((p) => ({ ...p, progress: memo.progress(p.tree) })),
+    roadmaps: (d.roadmaps || []).map((r) => ({ ...r, progress: roadmap.progress(r), stages: r.stages.map((st) => ({ ...st, info: roadmap.stageInfo(st, A.ymd(new Date()), r.hoursPerWeek) })) })),
+    roadmapDraft: d.roadmapDraft || null,
+    roadmapLoad: roadmap.weeklyLoad(d.roadmaps || [], A.ymd(new Date()), 8),
     settings: pub,
     profile: d.profile,
     events: d.events,
@@ -732,6 +736,94 @@ function registerIpc() {
       course: loaded.courses.some((c) => c.name === opts.course) ? opts.course : '',
       days,
       focus: opts.focus,
+    })
+  }))
+
+  // ── 학기 로드맵 역산 (제안 → 승인 → 조각 체크 → 이번 주 배치 → 밀리면 다시 배분) ──
+  ipcMain.handle('nf:roadmap:propose', (_e, opts = {}) => withBusy('roadmap', async () => {
+    const d = store.get()
+    const today = A.ymd(new Date())
+    const loaded = loadStudy()
+    if (!loaded.ok) return { ok: false, message: loaded.message || '설정에서 과목 자료 폴더를 지정해 주세요' }
+    const previous = opts.replanId ? (d.roadmaps || []).find((r) => r.id === opts.replanId) || null : null
+    const course = previous ? previous.course : String(opts.course || '')
+    const target = previous && !opts.date ? previous.target : { label: opts.label, date: opts.date }
+    const r = await roadmap.propose({
+      loaded,
+      course,
+      target,
+      hoursPerWeek: opts.hoursPerWeek ?? previous?.hoursPerWeek,
+      today,
+      notes: loaded.ok ? courses.pickNotes(loaded, course, `${target?.label || ''} 우선순위 ${(loaded.courses.find((c) => c.name === course)?.strategy || '').slice(0, 1500)}`, { max: 4, maxChars: 8000 }) : [],
+      memory: memCtx(),
+      previous,
+      llm: llmClaudeFirst(),
+    })
+    if (r.ok) store.update((x) => (x.roadmapDraft = { ...r.draft, replanId: previous?.id || null }))
+    broadcast()
+    return r.ok ? { ok: true, stages: r.draft.stages.length } : r
+  }))
+  ipcMain.handle('nf:roadmap:draftStage', (_e, stageId) => {
+    store.update((x) => {
+      if (x.roadmapDraft) x.roadmapDraft.stages = x.roadmapDraft.stages.filter((s) => s.id !== stageId)
+    })
+    broadcast()
+    return true
+  })
+  ipcMain.handle('nf:roadmap:decide', (_e, keep) => {
+    const dr = store.get().roadmapDraft
+    if (!dr) return { ok: false, message: '승인할 로드맵이 없어요' }
+    if (keep && !dr.stages.length) return { ok: false, message: '단계가 하나도 없어요' }
+    store.update((x) => {
+      x.roadmapDraft = null
+      if (!keep) return
+      const { replanId, warnings, questions, replan, ...rm } = dr
+      // 같은 과목 로드맵은 새 것으로 바꾼다 (다시 배분이면 끝낸 조각은 archived 로 이어진다)
+      x.roadmaps = [...(x.roadmaps || []).filter((r) => r.id !== replanId && r.course !== rm.course), { ...rm, approvedAt: new Date().toISOString() }]
+    })
+    signal({ type: keep ? 'roadmap-accept' : 'roadmap-drop', title: `${dr.course} ${dr.target.label}`, course: dr.course })
+    broadcast()
+    return { ok: true, message: keep ? '로드맵을 저장했어요' : '제안을 버렸어요' }
+  })
+  ipcMain.handle('nf:roadmap:toggle', (_e, rmId, stageId, ci, si) => {
+    let hit = null
+    store.update((x) => {
+      const st = (x.roadmaps || []).find((r) => r.id === rmId)?.stages.find((s) => s.id === stageId)
+      const step = st?.concepts[ci]?.steps[si]
+      if (!step) return
+      step.done = !step.done
+      step.doneAt = step.done ? new Date().toISOString() : undefined
+      hit = { step, course: (x.roadmaps || []).find((r) => r.id === rmId).course }
+    })
+    if (hit) signal({ type: hit.step.done ? 'step' : 'unstep', title: hit.step.title, minutes: hit.step.minutes, course: hit.course, roadmap: true })
+    broadcast()
+    return !!hit
+  })
+  ipcMain.handle('nf:roadmap:remove', (_e, rmId) => {
+    store.update((x) => (x.roadmaps = (x.roadmaps || []).filter((r) => r.id !== rmId)))
+    broadcast()
+    return true
+  })
+  ipcMain.handle('nf:roadmap:week', (_e, rmId) => withBusy('coach', async () => {
+    const rm = (store.get().roadmaps || []).find((r) => r.id === rmId)
+    if (!rm) return { ok: false, message: '로드맵을 찾지 못했어요' }
+    const today = A.ymd(new Date())
+    const tasks = roadmap.weekSteps(rm, today)
+    if (!tasks.length) return { ok: false, message: '이번 주에 배치할 남은 조각이 없어요' }
+    const loaded = loadStudy()
+    if (!loaded.ok) return { ok: false, message: loaded.message || '설정에서 과목 자료 폴더를 지정해 주세요' }
+    const now = new Date()
+    return studyPlan.plan({
+      loaded,
+      docs: courses.loadPlanDocs(loaded.root),
+      items: weekItems(7),
+      today,
+      nowMin: now.getHours() * 60 + now.getMinutes(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      llm: llmClaudeFirst(),
+      course: loaded.courses.some((c) => c.name === rm.course) ? rm.course : '',
+      days: 7,
+      tasks,
     })
   }))
 
