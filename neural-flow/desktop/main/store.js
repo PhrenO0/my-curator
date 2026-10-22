@@ -110,6 +110,10 @@ function emptyData() {
     doneMap: {},
     account: null, // { email, name, picture, refreshEnc }
     notes: [],
+    memo: { text: '', updatedAt: null }, // 위젯·관리 창 메모장 (사용자가 아무렇게나 적는 곳)
+    memoCandidates: [], // AI 가 정리한 일정·할 일 후보 (수락 전)
+    memoQuestions: [],
+    plans: [], // 수락한 일 + 쪼갠 개념 트리
     inbox: [],
     lastRun: {},
   }

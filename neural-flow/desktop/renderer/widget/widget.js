@@ -12,6 +12,7 @@ async function refresh() {
   S = await nf.snapshot()
   document.body.classList.toggle('edit', S.widgetMode === 'edit')
   document.body.classList.toggle('privacy', !!S.privacy)
+  syncMemo()
   if (S.locked) return renderLocked()
   if (!selected || !view) {
     selected = S.today
@@ -22,6 +23,84 @@ async function refresh() {
   document.body.classList.toggle('edit', S.widgetMode === 'edit')
   render()
 }
+
+// ── 쪼갠 할 일 (개념 트리 요약: 진행 막대 + 다음 조각 3개) ──
+function plansCard() {
+  const plans = (S.plans || []).filter((p) => p.tree && p.progress.done < p.progress.total)
+  if (!plans.length) return ''
+  const bar = (p) => {
+    const n = 10
+    const on = p.progress.total ? Math.round((p.progress.done / p.progress.total) * n) : 0
+    return `<span class="pbar" aria-label="${p.progress.done}/${p.progress.total}">${'▓'.repeat(on)}${'░'.repeat(n - on)}</span>`
+  }
+  return `<section class="card plans">
+    <div class="card-h">${icon('list-todo', 13)}<span class="grow">쪼갠 할 일</span>
+      <button class="icon-btn" data-act="open" data-view="memo" title="트리 전체 보기">${icon('external-link', 13)}</button></div>
+    ${plans
+      .slice(0, 3)
+      .map((p) => {
+        const next = []
+        p.tree.concepts.forEach((c, ci) => c.steps.forEach((st, si) => !st.done && next.push({ c, st, ci, si })))
+        return `<div class="plan">
+          <div class="plan-h"><span class="pt">${esc(p.title)}</span>${bar(p)}<span class="pn">${p.progress.done}/${p.progress.total}</span></div>
+          ${next
+            .slice(0, 3)
+            .map((x) => `<button class="step" data-act="step" data-plan="${esc(p.id)}" data-ci="${x.ci}" data-si="${x.si}"><span class="box"></span><span class="st">${esc(x.st.title)}</span><span class="sm">${x.st.minutes}분</span></button>`)
+            .join('')}
+        </div>`
+      })
+      .join('')}
+  </section>`
+}
+
+// ── 메모장 ──
+const $memo = document.getElementById('memo')
+const $memoWrap = document.getElementById('memo-wrap')
+const $memoState = document.getElementById('memo-state')
+let memoTimer = null
+function syncMemo() {
+  $memoWrap.hidden = !S || S.locked
+  if (!S || S.locked) return
+  if (document.activeElement !== $memo && $memo.value !== (S.memo?.text || '')) $memo.value = S.memo?.text || ''
+  const busy = !!S.busy?.memo
+  const btn = document.getElementById('memo-organize')
+  btn.disabled = busy
+  btn.textContent = busy ? '정리 중…' : '정리'
+  const pending = (S.memoCandidates || []).length
+  if (!memoTimer) $memoState.textContent = pending ? `후보 ${pending}개 확인 대기` : ''
+}
+function saveMemo() {
+  clearTimeout(memoTimer)
+  memoTimer = null
+  $memoState.textContent = '저장됨'
+  return nf.saveMemo($memo.value)
+}
+// Windows 고정 위젯은 평소 키보드를 받지 않는다 → 누를 때만 잠시 받게 한다
+$memo.addEventListener('pointerdown', async () => {
+  if (document.activeElement === $memo) return
+  await nf.widgetFocus(true)
+  $memo.focus()
+})
+$memo.addEventListener('input', () => {
+  $memoState.textContent = '적는 중…'
+  nf.setInputActive?.(true).catch(() => {})
+  clearTimeout(memoTimer)
+  memoTimer = setTimeout(saveMemo, 600)
+})
+$memo.addEventListener('blur', async () => {
+  if (memoTimer) await saveMemo()
+  nf.setInputActive?.(false).catch(() => {})
+  nf.widgetFocus(false)
+})
+$memo.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $memo.blur()
+})
+document.getElementById('memo-organize').addEventListener('click', async () => {
+  if (memoTimer) await saveMemo()
+  nf.open('memo') // 후보 확인·수락은 관리 창에서
+  const r = await nf.organizeMemo()
+  if (r && !r.ok) $memoState.textContent = r.message
+})
 
 // ── 조각들 ───────────────────────────────────────────────────────────────────
 function clockCard() {
@@ -153,6 +232,7 @@ function render() {
       ? `<button class="update-pill" data-act="open" data-view="update">${icon('sparkles', 13)}<span>${esc(S.update.version)} 새 버전 — 눌러서 업데이트</span></button>`
       : '') +
     clockCard() +
+    plansCard() +
     (sec.showCalendar !== false ? calendarCard(occ, dayItems) : '')
 
 }
@@ -169,6 +249,7 @@ root.addEventListener('click', async (e) => {
     return nf.run('calendar')
   }
   if (act === 'open') return nf.open(el.dataset.view)
+  if (act === 'step') return nf.togglePlanStep(el.dataset.plan, Number(el.dataset.ci), Number(el.dataset.si))
   if (act === 'link') return nf.openLink(el.dataset.url)
   if (act === 'say') return speak(el.dataset.text)
   if (act === 'pin') return nf.setWidgetMode('pinned')
@@ -196,7 +277,7 @@ root.addEventListener('click', async (e) => {
 })
 
 // 내용 높이에 맞춰 창 크기 조절
-new ResizeObserver(() => nf.resizeWidget(root.getBoundingClientRect().height)).observe(root)
+new ResizeObserver(() => nf.resizeWidget(document.getElementById('wrap').getBoundingClientRect().height)).observe(document.getElementById('wrap'))
 
 // 시계: 1초마다 숫자만 갱신, 날짜가 바뀌면 전체 갱신
 setInterval(() => {

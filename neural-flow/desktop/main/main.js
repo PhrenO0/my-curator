@@ -37,6 +37,7 @@ const { detectCodex } = require('./codex.js')
 const scheduleCoach = require('./schedule-coach.js')
 const courses = require('./courses.js')
 const studyPlan = require('./study-plan.js')
+const memo = require('./memo.js')
 const { pinToDesktop } = require('./win-desktop.js')
 
 const ROOT = path.join(__dirname, '..')
@@ -172,6 +173,13 @@ function llm() {
   return { ...base, provider: codexStatus?.subscription ? 'codex' : claudeVersion ? 'claude' : 'none' }
 }
 
+// 메모 정리·쪼개기는 사용자가 Claude 구독을 쓰길 원해서, 엔진이 '자동'이면 Claude Code 를 먼저 쓴다
+function llmClaudeFirst() {
+  const l = llm()
+  if ((store.get().settings.engine || 'auto') === 'auto' && claudeVersion) return { ...l, provider: 'claude' }
+  return l
+}
+
 // ── 화면에 보낼 스냅샷 (비밀값 제외) ─────────────────────────────────────────
 function snapshot() {
   const d = store.get()
@@ -210,6 +218,10 @@ function snapshot() {
     ...base,
     winDesktop: desktopPin ? desktopPin.status() : null,
     notes: (d.notes || []).slice(-50),
+    memo: d.memo || { text: '' },
+    memoCandidates: d.memoCandidates || [],
+    memoQuestions: d.memoQuestions || [],
+    plans: (d.plans || []).map((p) => ({ ...p, progress: memo.progress(p.tree) })),
     settings: pub,
     profile: d.profile,
     events: d.events,
@@ -720,6 +732,99 @@ function registerIpc() {
       focus: opts.focus,
     })
   }))
+
+  // ── 메모장 → 정리(제안) → 수락 → 쪼개기 ──
+  ipcMain.handle('nf:memo:save', (_e, text) => {
+    store.update((d) => (d.memo = { text: String(text ?? '').slice(0, memo.MAX_MEMO), updatedAt: new Date().toISOString() }))
+    broadcast()
+    return true
+  })
+  ipcMain.handle('nf:memo:organize', () => withBusy('memo', async () => {
+    const d = store.get()
+    const today = A.ymd(new Date())
+    const now = new Date()
+    const loaded = loadStudy()
+    const r = await memo.organize({
+      text: d.memo?.text || '',
+      today,
+      now: A.hm(now),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      items: weekItems(14),
+      courses: loaded.ok ? loaded.courses.map((c) => c.name) : [],
+      llm: llmClaudeFirst(),
+    })
+    if (r.ok) store.update((x) => {
+      x.memoCandidates = r.candidates
+      x.memoQuestions = r.questions || []
+    })
+    broadcast()
+    return { ok: r.ok, message: r.message, count: r.candidates?.length || 0, source: r.source }
+  }))
+  ipcMain.handle('nf:memo:decide', async (_e, id, action, edits = {}) => {
+    const d = store.get()
+    const c = (d.memoCandidates || []).find((x) => x.id === id)
+    if (!c) return { ok: false, message: '이미 처리한 후보예요' }
+    const today = A.ymd(new Date())
+    if (action === 'drop') {
+      store.update((x) => {
+        x.memoCandidates = x.memoCandidates.filter((y) => y.id !== id)
+        x.memo = { ...x.memo, text: memo.markLines(x.memo.text, c.lines, memo.MARK_DROP) }
+      })
+      broadcast()
+      return { ok: true, message: '버렸어요 (메모 줄에 ✗ 표시)' }
+    }
+    const v = memo.shape({ ...c, ...edits, id: c.id, lines: c.lines, source: c.source }, today)
+    if (!v.title) return { ok: false, message: '제목을 입력해 주세요' }
+    const title = v.course && !v.title.startsWith('[') ? `[${v.course}] ${v.title}` : v.title
+    const r = await commitInput(
+      v.kind === 'event'
+        ? { kind: 'event', title, date: v.date, start: v.start, minutes: v.minutes || 60, note: v.note }
+        : { kind: 'task', title, date: v.date, minutes: v.minutes }
+    )
+    if (!r?.ok) return r || { ok: false, message: '저장하지 못했어요' }
+    store.update((x) => {
+      x.memoCandidates = x.memoCandidates.filter((y) => y.id !== id)
+      x.memo = { ...x.memo, text: memo.markLines(x.memo.text, c.lines, memo.MARK_DONE) }
+      x.plans = [...(x.plans || []), { id: uid(), title, course: v.course, kind: v.kind, date: v.date, start: v.start, minutes: v.minutes, note: v.note, createdAt: new Date().toISOString(), tree: null }].slice(-50)
+    })
+    broadcast()
+    return { ok: true, message: v.kind === 'event' ? '구글 캘린더(또는 앱 일정)에 넣었어요' : '앱 할 일에 넣었어요' }
+  })
+  ipcMain.handle('nf:plan:breakdown', (_e, ids) => withBusy('memo', async () => {
+    const d = store.get()
+    const want = Array.isArray(ids) && ids.length ? ids : (d.plans || []).filter((p) => !p.tree).map((p) => p.id)
+    const plans = (d.plans || []).filter((p) => want.includes(p.id))
+    const loaded = loadStudy()
+    const today = A.ymd(new Date())
+    const r = await memo.breakdown({ plans, contextFor: (course) => (loaded.ok ? courses.buildContext(loaded, { course, today, maxChars: 6000 }) : ''), llm: llmClaudeFirst() })
+    if (r.ok) store.update((x) => {
+      for (const p of x.plans || []) if (r.trees[p.id]) p.tree = r.trees[p.id]
+    })
+    broadcast()
+    return { ok: r.ok, message: r.message, count: r.ok ? Object.keys(r.trees).length : 0 }
+  }))
+  ipcMain.handle('nf:plan:toggle', (_e, planId, ci, si) => {
+    store.update((x) => {
+      const step = (x.plans || []).find((p) => p.id === planId)?.tree?.concepts?.[ci]?.steps?.[si]
+      if (step) step.done = !step.done
+    })
+    broadcast()
+    return true
+  })
+  ipcMain.handle('nf:plan:remove', (_e, planId) => {
+    store.update((x) => (x.plans = (x.plans || []).filter((p) => p.id !== planId)))
+    broadcast()
+    return true
+  })
+  // 위젯 메모: Windows 고정 위젯은 평소 키보드 포커스를 받지 않는다 → 메모를 누를 때만 잠시 받게
+  ipcMain.handle('nf:widget:focus', (e, on) => {
+    if (!widget || widget.isDestroyed() || e.sender !== widget.webContents) return false
+    if (IS_WIN && widgetMode === 'pinned') {
+      widget.setFocusable(!!on)
+      if (on) widget.focus()
+    }
+    return true
+  })
 
   // PIN 해제 — 5번 틀리면 30초 대기
   let fails = 0

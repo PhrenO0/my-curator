@@ -37,6 +37,13 @@ contextBridge.exposeInMainWorld('nf', {
   studyCourses: call('nf:study:courses'),
   pickStudyFolder: call('nf:study:pick'),
   planStudy: call('nf:study:plan'),
+  saveMemo: call('nf:memo:save'),
+  organizeMemo: call('nf:memo:organize'),
+  decideCandidate: call('nf:memo:decide'),
+  breakdownPlans: call('nf:plan:breakdown'),
+  togglePlanStep: call('nf:plan:toggle'),
+  removePlan: call('nf:plan:remove'),
+  widgetFocus: call('nf:widget:focus'),
   setInputActive: call('nf:input:active'),
   // 보안 · 개인정보
   unlock: call('nf:security:unlock'),

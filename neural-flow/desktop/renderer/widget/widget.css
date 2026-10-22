@@ -644,3 +644,125 @@ body.privacy .card:hover .ag .title {
 .update-pill:hover {
   filter: brightness(1.06);
 }
+
+/* 메모장 */
+#wrap {
+  display: flex;
+  flex-direction: column;
+}
+.memo textarea {
+  width: 100%;
+  min-height: 96px;
+  max-height: 260px;
+  resize: vertical;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--g-fill);
+  color: inherit;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  outline: none;
+}
+.memo textarea:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.memo-state {
+  font-size: 11.5px;
+  color: var(--g-text-3);
+}
+.btn-mini {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-mini:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* 쪼갠 할 일 */
+.plans .plan + .plan {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--g-line);
+}
+.plan-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.plan-h .pt {
+  flex: 1;
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.pbar {
+  font-family: var(--font-num);
+  letter-spacing: -1px;
+  color: var(--accent);
+  font-size: 11px;
+}
+.plan-h .pn {
+  font-size: 11.5px;
+  color: var(--g-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.step .box {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: 1.5px solid var(--g-text-3);
+  border-radius: 4px;
+}
+.step:hover .box {
+  border-color: var(--accent);
+}
+.step .st {
+  flex: 1;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.step .sm {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--g-text-3);
+}
+body.privacy .memo textarea,
+body.privacy .plans .pt,
+body.privacy .plans .st {
+  filter: blur(6px);
+}
+#memo-wrap {
+  margin: 0 10px 10px;
+  color: var(--g-text);
+}
+#memo-wrap[hidden] {
+  display: none;
+}

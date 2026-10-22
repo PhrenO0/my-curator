@@ -24,6 +24,7 @@ const REPEATS = [
 const NAV = [
   ['today', '오늘', 'sun'],
   ['calendar', '캘린더', 'calendar-days'],
+  ['memo', '메모·쪼개기', 'sticky-note'],
   ['settings', '설정', 'settings'],
 ]
 
@@ -298,7 +299,7 @@ $askInput.addEventListener('keydown', (e) => {
 function renderSide() {
   const open = S.activities.filter((a) => a.status === '제안됨').length
   const todayCount = occ(S.today, S.today).length
-  const counts = { today: todayCount || '', board: open ? `${open} 제안` : '' }
+  const counts = { today: todayCount || '', board: open ? `${open} 제안` : '', memo: (S.memoCandidates || []).length || '' }
   const k = S.settings
   $side.innerHTML = `
     <div class="brand"><span class="brand-mark">${icon('waves', 15)}</span>neural-flow</div>
@@ -715,7 +716,93 @@ function oneThingModal() {
 }
 
 // ── 렌더 & 이벤트 ───────────────────────────────────────────────────────────
-const VIEWS = { today: viewToday, calendar: viewCalendar, settings: viewSettings }
+// ── 메모·쪼개기 ─────────────────────────────────────────────────────────────
+// 메모장(아무렇게나) → [Claude로 정리] → 후보를 하나씩 수락/버림 → [쪼개기] → 개념 트리
+let memoTimer = null
+const pbar = (p, n = 10) => {
+  const on = p.total ? Math.round((p.done / p.total) * n) : 0
+  return `<span class="pbar">${'▓'.repeat(on)}${'░'.repeat(n - on)}</span>`
+}
+function candTarget(c) {
+  return c.date && c.start ? 'Google 캘린더 일정' : '앱 할 일'
+}
+function viewMemo() {
+  const cands = S.memoCandidates || []
+  const plans = S.plans || []
+  const untreed = plans.filter((p) => !p.tree).length
+  const busy = !!S.busy.memo
+  return `<div class="page-h"><div class="titles"><div class="eyebrow">아무렇게나 적고, 고르고, 잘게 쪼개기</div><h1>메모·쪼개기</h1></div></div>
+  <div class="memo-grid">
+    <div class="stack">
+      <section class="card"><h2>${icon('sticky-note', 16)}메모장</h2>
+        <textarea class="input memo-text" id="memo-text" spellcheck="false" placeholder="메모장처럼 아무렇게나 적으세요. 바탕화면 위젯에서 적은 것도 여기 같이 보여요.&#10;예) 금요일 3시 팀플 회의 / 교통 GC 계산 다시 보기 / 자소서 2번">${esc(S.memo?.text || '')}</textarea>
+        <div class="btn-row"><button class="btn primary" data-act="memo-organize" ${busy ? 'disabled' : ''}>${busy ? '정리 중…' : 'Claude로 정리'}</button>
+        <span class="muted small">버튼을 누를 때만 AI를 불러요. ✓(수락)·✗(버림) 표시한 줄은 건너뛰어요.</span></div>
+      </section>
+      <section class="card"><h2>정리된 후보 · ${cands.length}</h2>
+        ${(S.memoQuestions || []).map((q) => `<p class="muted small">확인: ${esc(q)}</p>`).join('')}
+        ${
+          cands.length
+            ? cands
+                .map(
+                  (c) => `<div class="cand" data-id="${esc(c.id)}">
+            <input class="input" data-c="title" value="${esc(c.title)}" aria-label="제목" />
+            <div class="inline"><input class="input" type="date" data-c="date" value="${esc(c.date || '')}" aria-label="날짜" />
+            <input class="input" type="time" data-c="start" value="${esc(c.start || '')}" aria-label="시각" />
+            <input class="input" type="number" min="5" max="600" step="5" data-c="minutes" value="${c.minutes ?? ''}" placeholder="분" aria-label="기간(분)" /></div>
+            <p class="muted small">${c.course ? `${esc(c.course)} · ` : ''}저장: <b>${candTarget(c)}</b> · 근거: ${c.lines.map((l) => `“${esc(l)}”`).join(' ')}${c.note ? ` · ${esc(c.note)}` : ''}${c.source === 'rules' ? ' · 규칙 해석' : ''}</p>
+            <div class="btn-row"><button class="btn sm primary" data-act="cand-accept" data-id="${esc(c.id)}">수락</button><button class="btn sm ghost" data-act="cand-drop" data-id="${esc(c.id)}">버림</button></div>
+          </div>`
+                )
+                .join('')
+            : `<p class="muted">메모를 적고 [Claude로 정리]를 누르면 일정·할 일 후보가 여기에 떠요. 수락한 것만 저장돼요.</p>`
+        }
+      </section>
+    </div>
+    <section class="card"><h2><span class="grow">쪼갠 할 일 · 개념 트리</span>
+      ${untreed ? `<button class="btn sm primary" data-act="plan-breakdown" ${busy ? 'disabled' : ''}>${busy ? '쪼개는 중…' : `쪼개기 (${untreed}개)`}</button>` : ''}</h2>
+      ${plans.length ? plans.slice().reverse().map(planTree).join('') : '<p class="muted">후보를 수락하면 여기에 쌓이고, [쪼개기]로 개념 → 5~25분 행동 조각으로 나눠요.</p>'}
+    </section>
+  </div>`
+}
+function planTree(p) {
+  const pr = p.progress || { done: 0, total: 0, minutes: 0 }
+  const when = p.date ? `${A.formatKoreanDate(p.date)}${p.start ? ` ${p.start}` : ''}` : '날짜 없음'
+  return `<div class="tree">
+    <div class="tree-h"><span class="tt">📚 ${esc(p.title)}</span>${p.tree ? `${pbar(pr, 5)}<span class="pn">${pr.done}/${pr.total}</span>` : ''}
+      <button class="icon-btn" data-act="plan-remove" data-id="${esc(p.id)}" title="목록에서 지우기 (캘린더 일정은 그대로)">${icon('x', 13)}</button></div>
+    <div class="muted small">${esc(when)}${p.tree ? ` · 조각 합계 ${pr.minutes}분` : ' · 아직 안 쪼갰어요'}</div>
+    ${
+      p.tree
+        ? `<ul class="t-concepts">${p.tree.concepts
+            .map(
+              (c, ci) => `<li><span class="t-concept">${esc(c.title)}</span><ul class="t-steps">${c.steps
+                .map(
+                  (st, si) => `<li><button class="t-step ${st.done ? 'done' : ''}" data-act="plan-step" data-plan="${esc(p.id)}" data-ci="${ci}" data-si="${si}"><span class="box">${st.done ? icon('check', 11) : ''}</span><span>${esc(st.title)}</span><em>${st.minutes}분</em></button></li>`
+                )
+                .join('')}</ul></li>`
+            )
+            .join('')}</ul>`
+        : ''
+    }
+  </div>`
+}
+async function saveMemoNow() {
+  clearTimeout(memoTimer)
+  memoTimer = null
+  const ta = document.getElementById('memo-text')
+  if (ta) await nf.saveMemo(ta.value)
+}
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'memo-text') return
+  clearTimeout(memoTimer)
+  memoTimer = setTimeout(saveMemoNow, 600)
+})
+document.addEventListener('focusout', (e) => {
+  if (e.target.id === 'memo-text' && memoTimer) saveMemoNow()
+})
+
+const VIEWS = { today: viewToday, calendar: viewCalendar, memo: viewMemo, settings: viewSettings }
 
 function render() {
   if (!S) return
@@ -832,6 +919,30 @@ document.addEventListener('click', async (e) => {
       }
       return
     }
+    case 'memo-organize': {
+      await saveMemoNow()
+      const r = await nf.organizeMemo()
+      if (!r) return toast('이미 정리 중이에요')
+      return toast(r.ok ? `후보 ${r.count}개 — 확인하고 수락하세요${r.source === 'rules' ? ' (규칙 해석)' : ''}` : r.message)
+    }
+    case 'cand-accept':
+    case 'cand-drop': {
+      const box = el.closest('.cand')
+      const edits = {}
+      if (box) for (const i of box.querySelectorAll('[data-c]')) edits[i.dataset.c] = i.dataset.c === 'minutes' ? (i.value ? Number(i.value) : null) : i.value || null
+      document.activeElement?.blur()
+      const r = await nf.decideCandidate(d.id, act === 'cand-accept' ? 'accept' : 'drop', edits)
+      return toast(r?.message || '처리했어요')
+    }
+    case 'plan-breakdown': {
+      const r = await nf.breakdownPlans()
+      if (!r) return toast('이미 처리 중이에요')
+      return toast(r.ok ? `${r.count}개를 쪼갰어요` : r.message)
+    }
+    case 'plan-step':
+      return nf.togglePlanStep(d.plan, Number(d.ci), Number(d.si))
+    case 'plan-remove':
+      return nf.removePlan(d.id)
     case 'study-plan': {
       const r = await nf.planStudy({ course: studyCourse, days: 7 })
       if (!r?.ok) return toast(r?.message || '공부 일정을 제안하지 못했어요')
