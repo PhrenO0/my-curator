@@ -11,20 +11,8 @@
     <link rel="stylesheet" href="widget.css" />
   </head>
   <body>
-    <div id="wrap">
-      <!-- 시계 (위) → 메모장 (고정 영역) → 쪼갠 할 일·달력 (아래) -->
-      <header id="root-top"></header>
-      <!-- 메모장: 다시 그리지 않는 고정 영역 (입력 중 커서가 튀지 않게) -->
-      <section id="memo-wrap" class="card memo" hidden>
-        <div class="card-h"><span class="grow">메모</span><span class="memo-state" id="memo-state"></span>
-          <button class="btn-mini" id="memo-organize" title="Claude 로 일정·할 일 정리">정리</button></div>
-        <textarea id="memo" spellcheck="false" placeholder="아무렇게나 적어 두세요&#10;예) 금요일 3시 팀플 회의&#10;교통 GC 계산 다시 보기&#10;자소서 2번 문항"></textarea>
-      </section>
-      <main id="root" aria-live="polite"></main>
-    </div>
-    <script src="../shared/agenda.js"></script>
+    <div id="wrap"><main id="root" aria-live="polite"></main></div>
     <script src="../shared/icons.js"></script>
-    <script src="../shared/ui.js"></script>
     <script src="widget.js"></script>
   </body>
 </html>
