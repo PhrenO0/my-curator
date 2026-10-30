@@ -4,36 +4,65 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://*.googleusercontent.com"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
     />
-    <title>neural-flow</title>
+    <title>neural-flow 설정</title>
     <link rel="stylesheet" href="../shared/tokens.css" />
     <link rel="stylesheet" href="app.css" />
   </head>
   <body>
-    <div id="lock" hidden></div>
-    <div class="shell" id="shell">
-      <aside class="side" id="side"></aside>
-      <main class="main" id="main">
-        <!-- 새 버전 알림 배너 (다시 그리지 않는 고정 영역) -->
-        <div id="update-banner" hidden></div>
-        <!-- 언제든 입력: 모든 화면 상단에 고정 (다시 그리지 않아 입력이 끊기지 않는다) -->
-        <form class="ask" id="ask" autocomplete="off">
-          <svg class="i" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-          <input id="ask-input" placeholder="일정이나 공지를 적거나 붙여넣으세요 — 내일 오후 3시 커피챗" />
-          <kbd id="ask-kbd"></kbd>
+    <main class="wrap">
+      <header class="top"><h1>neural-flow</h1><p>Notion Command Center 의 <b>📅 앞으로 7일</b> 보드를 바탕화면에 띄워요. 위젯을 누르면 Notion 이 열려요.</p></header>
+
+      <section class="card">
+        <h2>1. Notion 연결</h2>
+        <p id="conn" class="status"></p>
+        <ol class="steps">
+          <li><a href="#" data-link="https://www.notion.so/profile/integrations">notion.so/profile/integrations</a> → <b>새 통합</b> (내부, 읽기 권한만)</li>
+          <li>Command Center 페이지 오른쪽 위 <b>⋯ → 연결</b>에서 그 통합을 추가</li>
+          <li>통합의 <b>내부 통합 시크릿</b>(ntn_…)을 아래에 붙여넣기</li>
+        </ol>
+        <form id="token-form" class="row" autocomplete="off">
+          <input class="input" id="token" type="password" placeholder="ntn_… (저장하면 다시 보이지 않아요)" spellcheck="false" />
+          <button class="btn primary" type="submit">저장하고 읽기</button>
         </form>
-        <div id="ask-preview"></div>
-        <div id="view"></div>
-      </main>
-    </div>
-    <dialog id="modal" class="modal"></dialog>
-    <dialog id="update-dialog" class="modal update-dialog"></dialog>
-    <div id="toast" class="toast" role="status"></div>
-    <script src="../shared/agenda.js"></script>
-    <script src="../shared/icons.js"></script>
-    <script src="../shared/ui.js"></script>
-    <script src="../shared/input-review.js"></script>
+        <label class="field">Command Center 주소 <span class="muted">(비우면 기본 페이지)</span>
+          <input class="input" id="page" data-key="notion.page" placeholder="https://www.notion.so/…" spellcheck="false" />
+        </label>
+        <div class="row">
+          <label class="field grow">눌렀을 때
+            <select class="input" data-key="notion.openIn"><option value="app">Notion 앱에서 열기</option><option value="web">브라우저에서 열기</option></select>
+          </label>
+          <label class="field">다시 읽기 (분)
+            <input class="input" type="number" min="5" max="240" step="5" data-key="notion.refreshMinutes" />
+          </label>
+        </div>
+        <div class="row"><button class="btn" id="refresh">지금 새로고침</button><button class="btn" id="open">Notion 에서 열기</button><button class="btn ghost" id="clear">토큰 지우기</button></div>
+      </section>
+
+      <section class="card">
+        <h2>2. 위젯</h2>
+        <div class="row">
+          <label class="field grow">너비 <input class="input" type="number" min="300" max="520" step="10" data-key="widget.width" /></label>
+          <label class="field grow">불투명도 <input class="input" type="range" min="0.3" max="1" step="0.02" data-key="widget.opacity" /></label>
+          <label class="field grow">테마
+            <select class="input" data-key="widget.theme"><option value="auto">시스템</option><option value="dark">어둡게</option><option value="light">밝게</option></select>
+          </label>
+        </div>
+        <div class="row"><button class="btn" id="move">위젯 옮기기 (Ctrl/⌘+Alt+N)</button></div>
+        <label class="check"><input type="checkbox" data-key="autoStart" /> 컴퓨터 켤 때 자동 실행</label>
+        <label class="check"><input type="checkbox" data-key="security.contentProtection" /> 화면 공유·캡처에 위젯 안 보이게</label>
+      </section>
+
+      <section class="card">
+        <h2>3. 업데이트</h2>
+        <p id="upd" class="status"></p>
+        <label class="check"><input type="checkbox" data-key="updates.autoCheck" /> 자동으로 새 버전 확인</label>
+        <label class="check"><input type="checkbox" data-key="updates.autoInstall" /> 받으면 자동 설치</label>
+        <div class="row"><button class="btn" id="check">업데이트 확인</button><button class="btn primary" id="install" hidden>지금 업데이트</button></div>
+      </section>
+      <p id="toast" class="toast" role="status"></p>
+    </main>
     <script src="app.js"></script>
   </body>
 </html>

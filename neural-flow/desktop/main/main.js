@@ -1,45 +1,11 @@
-// neural-flow desktop — 메인 프로세스
-// SENSE(일정·캘린더·뉴스) → THINK(Gemini) → ACT(위젯·알림) → REMEMBER(로컬 저장) 루프를
-// 사용자의 PC 안에서 상시 돌린다.
+// neural-flow desktop — Notion Command Center 의 "📅 앞으로 7일" 보드를 바탕화면 위젯으로 보여 준다.
+// 위젯을 누르면 Notion 앱에서 Command Center 가 열린다. 보드 자체는 Notion 쪽에서 매일 아침 갱신된다.
 
 const path = require('path')
-const fs = require('fs')
-const {
-  app,
-  BrowserWindow,
-  Tray,
-  Menu,
-  ipcMain,
-  nativeImage,
-  nativeTheme,
-  Notification,
-  screen,
-  shell,
-  safeStorage,
-  globalShortcut,
-  powerMonitor,
-  session,
-  dialog,
-} = require('electron')
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, Notification, screen, shell, safeStorage, globalShortcut, powerMonitor, session } = require('electron')
 const updater = require('./updater.js')
-const security = require('./security.js')
-
-const { Store, uid } = require('./store.js')
-const A = require('../renderer/shared/agenda.js')
-const brain = require('./brain.js')
-const { pullRemote } = require('./calendar.js')
-const { createScheduler } = require('./scheduler.js')
-const google = require('./google.js')
-const { interpret } = require('./input.js')
-const { issues, commitBatch } = require('../renderer/shared/input-review.js')
-const { detectClaude, providerOf } = require('./llm.js')
-const { detectCodex } = require('./codex.js')
-const scheduleCoach = require('./schedule-coach.js')
-const courses = require('./courses.js')
-const studyPlan = require('./study-plan.js')
-const roadmap = require('./roadmap.js')
-const memo = require('./memo.js')
-const memory = require('./memory.js')
+const notion = require('./notion.js')
+const { Store } = require('./store.js')
 const { pinToDesktop } = require('./win-desktop.js')
 
 const ROOT = path.join(__dirname, '..')
@@ -47,7 +13,7 @@ const PRELOAD = path.join(ROOT, 'preload.js')
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
 const DEV = process.argv.includes('--dev')
-const TEST_HOOK = process.env.NF_TEST_HOOK // 테스트용: E2E 스크립트 경로 (스케줄러를 끄고 스크립트가 앱을 조작)
+const TEST_HOOK = process.env.NF_TEST_HOOK // 테스트용: E2E 스크립트 경로
 
 if (TEST_HOOK && process.env.NF_DATA_DIR) app.setPath('userData', process.env.NF_DATA_DIR)
 
@@ -59,15 +25,14 @@ if (IS_WIN) app.setAppUserModelId('com.junsang.neuralflow')
 
 let store
 let widget = null
-let manager = null
+let settingsWin = null
 let tray = null
-let quick = null
-let widgetMode = 'pinned' // pinned(바탕화면 고정) | edit(이동·상호작용)
+let widgetMode = 'pinned' // pinned(바탕화면 고정) | edit(이동)
 let desktopPin = null // Windows Win+D 보호
-let codexStatus = null
-const inputDrafts = new Set()
-let claudeVersion = null // 노트북에 설치된 Claude Code 버전 (없으면 null)
-const busy = {}
+let refreshing = false
+let refreshTimer = null
+let update = { checking: false, available: false }
+const opened = [] // 테스트용: 연 주소 기록
 
 // ── 비밀값 암호화 (OS 키체인) ────────────────────────────────────────────────
 const enc = (v) => (v && safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(v).toString('base64') : v ? 'raw:' + v : '')
@@ -80,307 +45,88 @@ function dec(v) {
     return ''
   }
 }
-
-// 설치 파일에 같이 구운 구글 OAuth 클라이언트 (release 워크플로가 GitHub 비밀값으로 만든다).
-// 있으면 기기마다 클라이언트 ID 를 붙여넣지 않고 'Google 로그인' 버튼만 누르면 된다.
-function applyBuildConfig() {
-  if (TEST_HOOK && !process.env.NF_BUILD_CONFIG) return
-  let cfg = null
-  try {
-    cfg = JSON.parse(fs.readFileSync(process.env.NF_BUILD_CONFIG || path.join(ROOT, 'build-config.json'), 'utf-8'))
-  } catch {
-    return
-  }
-  const g = store.get().settings.google
-  if (!g.clientId && cfg.googleClientId)
-    store.update((d) => {
-      d.settings.google.clientId = cfg.googleClientId
-      if (cfg.googleClientSecret) d.settings.google.clientSecretEnc = enc(cfg.googleClientSecret)
-    })
+const token = () => dec(store.get().settings.notion.tokenEnc)
+const today = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// ── 로그인 (허용된 구글 계정만) ──────────────────────────────────────────────
-// 세션 잠금: PIN 이 있을 때 자리 비움·화면 잠금 뒤 다시 잠근다 (PIN 으로 해제)
-let sessionLocked = false
-const needsLogin = () => store.get().settings.requireLogin !== false && !store.get().account?.email
-const locked = () => needsLogin() || sessionLocked
-function lockSession(reason) {
-  if (!store.get().settings.security.pinHash || sessionLocked) return
-  sessionLocked = true
-  console.log(`[security] 잠금: ${reason}`)
-  quick?.hide()
-  broadcast()
-}
-let update = { checking: false, available: false } // 업데이트 상태 (화면 표시용)
-let gclient = null
-function googleClient() {
-  const d = store.get()
-  if (!d.account?.refreshEnc) return null
-  if (!gclient) {
-    const g = d.settings.google
-    gclient = new google.GoogleClient({
-      clientId: g.clientId,
-      clientSecret: dec(g.clientSecretEnc) || g.clientSecretPlain,
-      refreshToken: dec(d.account.refreshEnc),
-    })
-  }
-  return gclient
-}
-
-// ── 키 관리: safeStorage(OS 키체인) 암호화 → 평문 폴백 → 환경변수/.env ─────────
-function readDotenvKey() {
-  for (const p of [path.join(ROOT, '..', '..', '.env'), path.join(ROOT, '..', '.env'), path.join(ROOT, '.env')]) {
-    try {
-      const m = fs.readFileSync(p, 'utf-8').match(/^\s*GOOGLE_API_KEY\s*=\s*["']?([^"'\r\n]+)/m)
-      if (m) return m[1].trim()
-    } catch {}
-  }
-  return ''
-}
-
-function getKey() {
-  const s = store.get().settings
-  if (s.geminiKeyEnc && safeStorage.isEncryptionAvailable()) {
-    try {
-      return { key: safeStorage.decryptString(Buffer.from(s.geminiKeyEnc, 'base64')), source: '앱 설정(암호화)' }
-    } catch {}
-  }
-  if (s.geminiKeyPlain) return { key: s.geminiKeyPlain, source: '앱 설정' }
-  if (process.env.GOOGLE_API_KEY) return { key: process.env.GOOGLE_API_KEY, source: '환경변수' }
-  const env = TEST_HOOK ? '' : readDotenvKey() // 테스트 중엔 개발자 PC 의 .env 키를 읽지 않는다
-  if (env) return { key: env, source: '.env 파일' }
-  return { key: '', source: '' }
-}
-
-function setKey(key) {
-  store.update((d) => {
-    d.settings.geminiKeyEnc = ''
-    d.settings.geminiKeyPlain = ''
-    if (!key) return
-    if (safeStorage.isEncryptionAvailable()) d.settings.geminiKeyEnc = safeStorage.encryptString(key).toString('base64')
-    else d.settings.geminiKeyPlain = key
-  })
-}
-
-// 엔진 결정: auto = Claude Code(노트북에 설치돼 있으면) → Gemini 키 → 규칙
-function llm() {
-  const s = store.get().settings
-  const key = getKey().key
-  const base = { codexCmd: process.env.NF_CODEX_CMD || s.codexCmd, codexModel: s.codexModel, key, model: s.geminiModel || 'gemini-2.5-flash', claudeCmd: process.env.NF_CLAUDE_CMD || s.claudeCmd, claudeModel: s.claudeModel }
-  const engine = s.engine || 'auto'
-  if (engine === 'off') return { ...base, provider: 'none' }
-  if (engine === 'codex') return { ...base, provider: 'codex' }
-  if (engine === 'claude') return { ...base, provider: 'claude' }
-  if (engine === 'gemini') return { ...base, provider: key ? 'gemini' : 'none' }
-  return { ...base, provider: codexStatus?.subscription ? 'codex' : claudeVersion ? 'claude' : 'none' }
-}
-
-// 메모 정리·쪼개기는 사용자가 Claude 구독을 쓰길 원해서, 엔진이 '자동'이면 Claude Code 를 먼저 쓴다
-function llmClaudeFirst() {
-  const l = llm()
-  if ((store.get().settings.engine || 'auto') === 'auto' && claudeVersion) return { ...l, provider: 'claude' }
-  return l
-}
-
-// ── 화면에 보낼 스냅샷 (비밀값 제외) ─────────────────────────────────────────
+// ── 화면에 넘기는 상태 (토큰은 절대 넘기지 않는다) ──────────────────────────
 function snapshot() {
   const d = store.get()
-  const { geminiKeyEnc, geminiKeyPlain, google: g, security: sec, ...settings } = d.settings
-  const { pinHash, ...secPublic } = sec
-  const k = getKey()
-  const { clientSecretEnc, clientSecretPlain, ...gPublic } = g
-  const base = {
-    today: A.ymd(new Date()),
-    platform: process.platform,
-    locked: locked(),
-    sessionLocked,
-    needsLogin: needsLogin(),
-    version: app.getVersion(),
-    packaged: app.isPackaged,
-    update: { ...update },
-    privacy: !!d.settings.security.privacyMode,
-    encrypted: store.encrypted,
-    account: d.account ? { email: d.account.email, name: d.account.name, picture: d.account.picture } : null,
-    busy: { ...busy },
-    widgetMode,
-  }
-  const pub = {
-    ...settings,
-    google: { ...gPublic, hasSecret: !!(clientSecretEnc || clientSecretPlain) },
-    security: { ...secPublic, hasPin: !!pinHash, canEncrypt: safeStorage.isEncryptionAvailable() },
-    hasKey: !!k.key,
-    keySource: k.source,
-    claudeVersion,
-    codexStatus,
-    provider: providerOf(llm()),
-  }
-  // 잠겨 있으면 일정·활동 같은 개인 데이터는 화면에 보내지 않는다
-  if (base.locked) return { ...base, settings: pub, profile: { domains: [] } }
+  const s = d.settings
   return {
-    ...base,
+    today: today(),
+    version: app.getVersion(),
+    platform: process.platform,
+    widgetMode,
+    refreshing,
+    board: d.board,
+    boardError: d.boardError || '',
+    hasToken: !!s.notion.tokenEnc,
+    update,
     winDesktop: desktopPin ? desktopPin.status() : null,
-    notes: (d.notes || []).slice(-50),
-    memo: d.memo || { text: '' },
-    memoCandidates: d.memoCandidates || [],
-    memoQuestions: d.memoQuestions || [],
-    learnProposals: d.learnProposals || [],
-    plans: (d.plans || []).map((p) => ({ ...p, progress: memo.progress(p.tree) })),
-    roadmaps: (d.roadmaps || []).map((r) => ({ ...r, progress: roadmap.progress(r), stages: r.stages.map((st) => ({ ...st, info: roadmap.stageInfo(st, A.ymd(new Date()), r.hoursPerWeek) })) })),
-    roadmapDraft: d.roadmapDraft || null,
-    roadmapLoad: roadmap.weeklyLoad(d.roadmaps || [], A.ymd(new Date()), 8),
-    settings: pub,
-    profile: d.profile,
-    events: d.events,
-    activities: d.activities,
-    remote: d.remote,
-    doneMap: d.doneMap || {},
-    brief: d.brief,
-    english: d.english,
-    englishHistory: (d.englishHistory || []).slice(-30),
-    news: d.news,
-    history: (d.history || []).slice(-60),
-    coachTips: [],
+    ...(TEST_HOOK ? { test: { opened } } : {}),
+    settings: {
+      autoStart: s.autoStart,
+      notion: { page: s.notion.page, defaultPage: notion.DEFAULT_PAGE, openIn: s.notion.openIn, refreshMinutes: s.notion.refreshMinutes },
+      updates: s.updates,
+      widget: s.widget,
+      security: { contentProtection: s.security.contentProtection },
+    },
   }
 }
 
 function broadcast() {
-  for (const w of [widget, manager, quick]) if (w && !w.isDestroyed()) w.webContents.send('nf:changed')
+  for (const w of [widget, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('nf:changed')
 }
 
-function setBusy(job, on) {
-  busy[job] = on
+// ── 보드 읽기 ────────────────────────────────────────────────────────────────
+async function refresh() {
+  if (refreshing) return { ok: false, message: '읽는 중이에요' }
+  refreshing = true
   broadcast()
-}
-
-async function withBusy(job, fn) {
-  if (busy[job]) return
-  setBusy(job, true)
   try {
-    return await fn()
-  } catch (e) {
-    if (job === 'input') throw e
-    console.error(`[${job}]`, e)
-  } finally {
-    setBusy(job, false)
-  }
-}
-
-function notify(title, body, view = 'today') {
-  if (!Notification.isSupported()) return
-  const n = new Notification({ title, body, silent: false })
-  n.on('click', () => openManager(view))
-  n.show()
-}
-
-// ── Jobs ─────────────────────────────────────────────────────────────────────
-function recordHistory(d, brief) {
-  if (!brief) return
-  d.history = (d.history || []).filter((h) => h.date !== brief.date)
-  d.history.push({ date: brief.date, one_thing: brief.one_thing, done: !!brief.done })
-  d.history = d.history.slice(-120)
-}
-
-// 구글 캘린더(로그인) + ICS 주소(선택)를 합쳐 remote 로
-async function runCalendar() {
-  return withBusy('calendar', async () => {
-    const previous = store.get().remote
-    const s = store.get().settings
-    const remote = await pullRemote(s.icsUrls || [])
-    const gc = googleClient()
-    if (gc) {
-      try {
-        const cals = await gc.calendars()
-        const target = s.google.defaultCalendar || 'primary'
-        const chosen = cals.filter((c) => (s.google.calendarIds ? s.google.calendarIds.includes(c.id) : c.selected) || (target === 'primary' ? c.primary : c.id === target))
-        const now = new Date()
-        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 45)
-        const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 150)
-        const g = await gc.events(chosen, from, to)
-        const failed = new Set(g.errors.map((e) => e.calendarId))
-        remote.events.push(...g.events.filter((e) => !failed.has(e.calendarId)), ...(previous.events || []).filter((e) => e.source === 'google' && failed.has(e.calendarId)))
-        remote.errors.push(...g.errors.map((e) => ({ url: e.calendar, message: e.message })))
-        remote.calendars = cals
-      } catch (e) {
-        remote.events.push(...(previous.events || []).filter((e) => e.source === 'google'))
-        remote.calendars = previous.calendars || []
-        remote.errors.push({ url: 'Google', message: e.message })
-      }
-    }
-    store.update((d) => (d.remote = remote))
-  })
-}
-
-// ── 언제든 입력: 미리보기 → 확인 → 실행 ──────────────────────────────────────
-async function previewInput(text) {
-  const t = String(text || '').trim()
-  if (!t) return null
-  return withBusy('input', async () => {
-    const item = await interpret(t, { today: A.ymd(new Date()), llm: llm(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })
-    return item
-  })
-}
-
-function endOf(start, minutes) {
-  if (!start || !minutes) return null
-  const e = google.addMinutes(start, Number(minutes))
-  return typeof e === 'string' ? e : null // 자정을 넘기면 끝 시각은 비워 둔다
-}
-
-async function commitInput(item) {
-  if (item?.kind === 'batch') return commitBatch(item, commitInput)
-  const errors = issues(item)
-  if (errors.length) return { ok: false, message: errors.join(' · ') }
-  const today = A.ymd(new Date())
-  const d = store.get()
-  const log = (msg) =>
-    store.update((x) => (x.inbox = [...(x.inbox || []), { at: new Date().toISOString(), kind: item.kind, title: item.title, result: msg }].slice(-100)))
-  if (item.kind === 'one_thing') {
-    store.update((x) => {
-      x.brief = { ...(x.brief && x.brief.date === today ? x.brief : { date: today, mode: 'daily' }), one_thing: item.title, done: false, source: 'manual' }
-      recordHistory(x, x.brief)
+    const s = store.get().settings.notion
+    const r = await notion.fetchBoard({ token: token(), page: s.page || notion.DEFAULT_PAGE, today: today() })
+    store.update((d) => {
+      if (r.ok) d.board = r.board
+      d.boardError = r.ok ? '' : r.message
     })
-    log('오늘의 단 하나로 정함')
-    return { ok: true, message: '오늘의 단 하나로 정했어요' }
+    return r.ok ? { ok: true, days: r.board.days.length } : r
+  } finally {
+    refreshing = false
+    broadcast()
   }
-  if (item.kind === 'note') {
-    store.update((x) => (x.notes = [...(x.notes || []), { id: uid(), at: new Date().toISOString(), text: item.title }]))
-    log('메모 저장')
-    return { ok: true, message: '메모했어요' }
-  }
-  if (item.kind === 'task') {
-    store.update((x) =>
-      x.activities.push({ id: uid(), name: item.title, domain: item.domain || '', priority: '중간', energy: '가벼움', repeat: '1회', min: item.minutes || null, date: item.date || null, start: item.start || null, status: item.date ? '예정됨' : '승인됨', why: '빠른 입력' })
-    )
-    log('활동 보드에 추가')
-    return { ok: true, message: '활동 보드에 추가했어요' }
-  }
-  // event: 로그인돼 있으면 구글 캘린더, 아니면 앱 안 일정
-  const note = [item.note, item.summary, item.link].filter(Boolean).join('\n')
-  const ev = { title: item.title, date: item.date, start: item.start || null, end: item.end || null, repeat: item.repeat || null, minutes: item.minutes || 60, note, location: item.location || '' }
-  const gc = item.target !== 'local' && googleClient()
-  if (gc) {
-    try {
-      await gc.createEvent(d.settings.google.defaultCalendar || 'primary', ev, Intl.DateTimeFormat().resolvedOptions().timeZone)
-      log('구글 캘린더에 추가')
-      await runCalendar()
-      return { ok: true, message: '구글 캘린더에 추가했어요 · 모바일에서도 같은 캘린더를 확인하세요' }
-    } catch (e) {
-      log(`구글 저장 실패: ${e.message}`)
-      return { ok: false, message: `구글 캘린더에 저장하지 못했어요: ${e.message}` }
-    }
-  }
-  if (item.target === 'google') return { ok: false, message: 'Google 로그인 후 다시 저장해 주세요' }
-  store.update((x) =>
-    x.events.push({ id: uid(), title: ev.title, date: ev.date, start: ev.start, end: ev.end || endOf(ev.start, ev.minutes), domain: item.domain || '', location: ev.location, note, repeat: ev.repeat, deadline: false, source: 'local' })
-  )
-  log('앱 일정에 추가')
-  return { ok: true, message: gc ? '구글 저장에 실패해 앱 일정에 넣었어요' : '일정에 추가했어요' }
 }
 
-const jobs = { calendar: runCalendar, onNewDay: () => broadcast() }
+function scheduleRefresh() {
+  clearInterval(refreshTimer)
+  if (TEST_HOOK) return
+  const min = Math.min(240, Math.max(5, Number(store.get().settings.notion.refreshMinutes) || 30))
+  refreshTimer = setInterval(refresh, min * 60 * 1000)
+}
 
-// ── 위젯 창 ──────────────────────────────────────────────────────────────────
-function widgetBounds(height = 640) {
+// 누르면 Notion 앱으로 (설정이 '브라우저'거나 앱이 없으면 웹으로)
+async function openNotion() {
+  const s = store.get().settings.notion
+  const urls = notion.openUrls(store.get().board, s.page || notion.DEFAULT_PAGE)
+  const target = s.openIn === 'web' ? urls.web : urls.app
+  if (TEST_HOOK) {
+    opened.push(target)
+    return { ok: true, url: target }
+  }
+  try {
+    await shell.openExternal(target)
+  } catch {
+    await shell.openExternal(urls.web)
+    return { ok: true, url: urls.web }
+  }
+  return { ok: true, url: target }
+}
+
+// ── 위젯 ─────────────────────────────────────────────────────────────────────
+function widgetBounds(height = 520) {
   const w = store.get().settings.widget
   const width = Math.max(300, Math.min(520, Number(w.width) || 360))
   let x = w.x
@@ -396,7 +142,7 @@ function createWidget() {
   const pinned = widgetMode === 'pinned'
   const prev = widget
   const opts = {
-    ...widgetBounds(prev && !prev.isDestroyed() ? prev.getBounds().height : 640),
+    ...widgetBounds(prev && !prev.isDestroyed() ? prev.getBounds().height : 520),
     frame: false,
     transparent: true,
     resizable: false,
@@ -406,17 +152,14 @@ function createWidget() {
     skipTaskbar: true,
     hasShadow: false,
     show: false,
-    alwaysOnTop: !pinned, // 편집 모드에서만 위로 띄워서 옮기기 쉽게
+    alwaysOnTop: !pinned, // 이동 모드에서만 위로
     title: 'neural-flow',
     backgroundColor: '#00000000',
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, backgroundThrottling: false },
   }
-  if (pinned) {
-    // Windows: 포커스를 받지 않는 창 → 클릭해도 다른 창 위로 올라오지 않는다(=바탕화면에 머무름).
-    // macOS/Linux: 'desktop' 타입 = 바탕화면 레벨에 고정 (단, 마우스 입력은 받지 않음 → 편집 모드로 조작).
-    if (IS_WIN) opts.focusable = false
-    else opts.type = 'desktop'
-  }
+  // Windows: 포커스를 받지 않는 창 → 눌러도 다른 창 위로 올라오지 않고 바탕화면에 머문다 (클릭은 받는다).
+  // macOS·Linux: 'desktop' 타입은 클릭을 못 받으므로 쓰지 않고, 보통 창으로 다른 창 뒤에 둔다.
+  if (pinned && IS_WIN) opts.focusable = false
   desktopPin?.stop()
   desktopPin = null
   widget = new BrowserWindow(opts)
@@ -425,9 +168,7 @@ function createWidget() {
   widget.loadFile(path.join(ROOT, 'renderer', 'widget', 'index.html'))
   widget.once('ready-to-show', () => {
     if (store.get().settings.widget.visible !== false) widget.showInactive()
-    applyClickThrough()
-    // Windows: Win+D(바탕화면 보기)에도 위젯이 남도록
-    if (IS_WIN && pinned) desktopPin = pinToDesktop(widget)
+    if (IS_WIN && pinned) desktopPin = pinToDesktop(widget) // Win+D 에도 남게
   })
   widget.on('moved', () => {
     const { x, y } = widget.getBounds()
@@ -437,12 +178,6 @@ function createWidget() {
     if (widget && widget.isDestroyed()) widget = null
   })
   if (prev && !prev.isDestroyed()) prev.destroy()
-}
-
-function applyClickThrough() {
-  if (!widget || widget.isDestroyed()) return
-  const on = widgetMode === 'pinned' && !!store.get().settings.widget.clickThrough
-  widget.setIgnoreMouseEvents(on, { forward: true })
 }
 
 function setWidgetMode(mode) {
@@ -461,74 +196,34 @@ function toggleWidgetVisible() {
   buildTray()
 }
 
-// ── 관리 창 ──────────────────────────────────────────────────────────────────
-function openManager(view) {
-  if (manager && !manager.isDestroyed()) {
-    if (view) manager.webContents.send('nf:navigate', view)
-    manager.show()
-    manager.focus()
+// ── 설정 창 ──────────────────────────────────────────────────────────────────
+function openSettings() {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.show()
+    settingsWin.focus()
     return
   }
-  manager = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 900,
-    minHeight: 620,
+  settingsWin = new BrowserWindow({
+    width: 560,
+    height: 720,
+    minWidth: 460,
+    minHeight: 520,
     show: false,
-    title: 'neural-flow',
+    title: 'neural-flow 설정',
     icon: path.join(ROOT, 'assets', 'icon.png'),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#111113' : '#fcfcfd',
     autoHideMenuBar: true,
-    ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 } } : {}),
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
   })
-  protect(manager)
-  manager.loadFile(path.join(ROOT, 'renderer', 'app', 'index.html'), { hash: view || 'today' })
-  manager.once('ready-to-show', () => manager.show())
-  manager.on('closed', () => (manager = null))
-}
-
-// ── 빠른 입력 창 (Spotlight 처럼) ────────────────────────────────────────────
-function toggleQuick() {
-  if (quick && !quick.isDestroyed() && quick.isVisible()) return quick.hide()
-  if (!quick || quick.isDestroyed()) {
-    const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
-    quick = new BrowserWindow({
-      width: 640,
-      height: 460,
-      x: Math.round(wa.x + (wa.width - 640) / 2),
-      y: Math.round(wa.y + wa.height * 0.18),
-      frame: false,
-      transparent: true,
-      resizable: false,
-      skipTaskbar: true,
-      alwaysOnTop: true,
-      show: false,
-      hasShadow: false,
-      backgroundColor: '#00000000',
-      webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
-    })
-    protect(quick)
-    quick.loadFile(path.join(ROOT, 'renderer', 'quick', 'index.html'))
-    quick.on('blur', () => !TEST_HOOK && quick?.hide())
-    // 숨긴 빠른 입력 창의 남은 글자가 자동 업데이트를 무기한 막지 않게 (다시 입력하면 다시 표시)
-    quick.on('hide', () => {
-      if (!inputDrafts.delete(quick.webContents.id)) return
-      if (!inputDrafts.size && update.pending && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, installing: update.installing })) installUpdate()
-    })
-    quick.on('closed', () => (quick = null))
-    quick.once('ready-to-show', () => quick.show())
-    return
-  }
-  quick.show()
-  quick.focus()
-  quick.webContents.send('nf:navigate', 'focus')
+  protect(settingsWin)
+  settingsWin.loadFile(path.join(ROOT, 'renderer', 'app', 'index.html'))
+  settingsWin.once('ready-to-show', () => settingsWin.show())
+  settingsWin.on('closed', () => (settingsWin = null))
 }
 
 // ── 트레이 ───────────────────────────────────────────────────────────────────
 function trayImage() {
-  const file = IS_MAC ? 'trayTemplate.png' : 'tray.png'
-  const img = nativeImage.createFromPath(path.join(ROOT, 'assets', file))
+  const img = nativeImage.createFromPath(path.join(ROOT, 'assets', IS_MAC ? 'trayTemplate.png' : 'tray.png'))
   if (IS_MAC) img.setTemplateImage(true)
   return img
 }
@@ -537,41 +232,20 @@ function buildTray() {
   if (!tray) {
     tray = new Tray(trayImage())
     tray.setToolTip('neural-flow')
-    tray.on('click', () => (IS_MAC ? tray.popUpContextMenu() : openManager()))
+    tray.on('click', () => (IS_MAC ? tray.popUpContextMenu() : openNotion()))
   }
   const s = store.get().settings
   const shortcut = IS_MAC ? '⌘⌥N' : 'Ctrl+Alt+N'
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `빠른 입력 (${IS_MAC ? '⌘⇧Space' : 'Ctrl+Shift+Space'})`, click: toggleQuick },
-      { label: '열기 (오늘)', click: () => openManager('today') },
-      { label: '캘린더', click: () => openManager('calendar') },
+      { label: 'Notion 에서 열기', click: () => openNotion() },
+      { label: '지금 새로고침', click: () => refresh() },
       { type: 'separator' },
       { label: s.widget.visible !== false ? '위젯 숨기기' : '위젯 보이기', click: toggleWidgetVisible },
-      {
-        label: widgetMode === 'edit' ? `위젯 고정하기 (${shortcut})` : `위젯 편집·이동 (${shortcut})`,
-        click: () => setWidgetMode(widgetMode === 'edit' ? 'pinned' : 'edit'),
-      },
-      {
-        label: '위젯 클릭 통과',
-        type: 'checkbox',
-        checked: !!s.widget.clickThrough,
-        click: (item) => {
-          store.update((d) => (d.settings.widget.clickThrough = item.checked))
-          applyClickThrough()
-        },
-      },
-      { type: 'separator' },
-      { label: '캘린더 새로고침', click: () => runCalendar() },
+      { label: widgetMode === 'edit' ? `위젯 고정하기 (${shortcut})` : `위젯 옮기기 (${shortcut})`, click: () => setWidgetMode(widgetMode === 'edit' ? 'pinned' : 'edit') },
+      { label: '설정', click: openSettings },
       { type: 'separator' },
       ...(update.available ? [{ label: `업데이트 ${update.version} 설치`, click: () => installUpdate() }] : []),
-      {
-        label: `가리기 모드 (${IS_MAC ? '⌘⌥P' : 'Ctrl+Alt+P'})`,
-        type: 'checkbox',
-        checked: !!s.security.privacyMode,
-        click: () => togglePrivacy(),
-      },
-      ...(s.security.pinHash ? [{ label: '지금 잠그기', click: () => lockSession('트레이') }] : []),
       { label: '종료', role: 'quit' },
     ])
   )
@@ -579,25 +253,12 @@ function buildTray() {
 
 // ── 보안 ─────────────────────────────────────────────────────────────────────
 function protect(win) {
-  // 화면 공유·캡처(Zoom·디스코드·캡처 도구)에 이 창이 찍히지 않게 (Windows·macOS)
+  // 화면 공유·캡처에 이 창이 찍히지 않게 (Windows·macOS)
   if (win && !win.isDestroyed()) win.setContentProtection(!!store.get().settings.security.contentProtection && !TEST_HOOK)
 }
-function togglePrivacy() {
-  store.update((d) => (d.settings.security.privacyMode = !d.settings.security.privacyMode))
-  buildTray()
-}
 function hardenSession() {
-  // 카메라·마이크·위치·알림 외 권한 요청은 모두 거절 (앱은 아무 권한도 필요 없다)
-  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(false))
+  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
-}
-function startSecurityWatch() {
-  powerMonitor.on('lock-screen', () => store.get().settings.security.lockOnScreenLock && lockSession('화면 잠금'))
-  powerMonitor.on('suspend', () => store.get().settings.security.lockOnScreenLock && lockSession('절전'))
-  setInterval(() => {
-    const min = Number(store.get().settings.security.idleLockMinutes) || 0
-    if (min > 0 && powerMonitor.getSystemIdleTime() >= min * 60) lockSession('자리 비움')
-  }, 30000)
 }
 
 // ── 업데이트 ─────────────────────────────────────────────────────────────────
@@ -609,22 +270,22 @@ async function checkUpdate({ manual = false } = {}) {
   try {
     const r = await updater.check(app.getVersion())
     update = { ...r, checking: false }
-    // 직접 확인했는데 예전에 건너뛴 버전이면 건너뛰기를 풀어서 다시 보여준다
     if (manual && r.available && r.version === store.get().settings.updates.skipVersion) store.update((d) => (d.settings.updates.skipVersion = ''))
     const skip = store.get().settings.updates.skipVersion
-    if (r.available && r.version !== notifiedVersion && (manual || r.version !== skip)) {
+    if (r.available && r.version !== notifiedVersion && (manual || r.version !== skip) && (!store.get().settings.updates.autoInstall || !app.isPackaged)) {
       notifiedVersion = r.version
-      if (!store.get().settings.updates.autoInstall || !app.isPackaged) notify(`⬆️ neural-flow ${r.version} 업데이트`, '눌러서 업데이트하세요', 'update')
+      if (Notification.isSupported()) {
+        const n = new Notification({ title: `⬆️ neural-flow ${r.version} 업데이트`, body: '눌러서 설정에서 업데이트하세요' })
+        n.on('click', openSettings)
+        n.show()
+      }
     }
   } catch (e) {
     update = { ...update, checking: false, error: e.message }
   }
   broadcast()
   buildTray()
-  if (!manual && store.get().settings.updates.autoInstall !== false && update.available) {
-    update.pending = inputDrafts.size > 0
-    if (updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, dirty: inputDrafts.size > 0 })) await installUpdate()
-  }
+  if (!manual && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged })) await installUpdate()
   return update
 }
 function startUpdateWatch() {
@@ -633,16 +294,14 @@ function startUpdateWatch() {
   setTimeout(run, 1500)
   setInterval(run, 6 * 3600 * 1000)
 }
-let stagedUpdate = null
 async function installUpdate() {
   if (update.downloading != null || update.installing) return { ok: false, message: '업데이트 중이에요' }
-  if (inputDrafts.size) { update.pending = true; broadcast(); return { ok: false, message: '입력 중인 일정을 저장하거나 닫으면 업데이트해요' } }
   if (!update.available || !update.asset) return { ok: false, message: '받을 업데이트가 없어요' }
   if (!app.isPackaged && !process.env.NF_UPDATE_DRYRUN) return { ok: false, message: '개발 실행 중이에요 — git pull 로 업데이트하세요' }
   try {
     update = { ...update, downloading: 0 }
     broadcast()
-    const got = stagedUpdate?.version === update.version ? stagedUpdate.got : await updater.download(update.asset, (p) => {
+    const got = await updater.download(update.asset, (p) => {
       update.downloading = Math.round(p * 100)
       broadcast()
     })
@@ -651,8 +310,6 @@ async function installUpdate() {
       broadcast()
       return { ok: true, dryRun: true, verified: got.verified, sha256: got.sha256 }
     }
-    stagedUpdate = { version: update.version, got }
-    if (inputDrafts.size) { update.pending = true; broadcast(); return { ok: false, message: '입력한 내용을 저장한 뒤 자동 업데이트해요' } }
     update.installing = true
     broadcast()
     store.flush()
@@ -668,572 +325,58 @@ async function installUpdate() {
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
 function registerIpc() {
-  // 잠겨 있을 때도 쓸 수 있는 채널만 열어 두고, 나머지는 로그인 전 거부
-  const OPEN = new Set(['nf:security:unlock', 'nf:update:check', 'nf:snapshot', 'nf:auth:signin', 'nf:auth:config', 'nf:auth:simple', 'nf:open', 'nf:link', 'nf:widget:resize', 'nf:quick:hide', 'nf:quick:open', 'nf:input:active'])
-  const handle = ipcMain.handle.bind(ipcMain)
-  ipcMain.handle = (ch, fn) =>
-    handle(ch, (...args) => {
-      if (!OPEN.has(ch) && locked()) throw new Error('로그인이 필요해요')
-      return fn(...args)
-    })
-
   ipcMain.handle('nf:snapshot', () => snapshot())
-  ipcMain.handle('nf:input:active', (e, active) => {
-    if (active && !inputDrafts.has(e.sender.id)) {
-      inputDrafts.add(e.sender.id)
-      e.sender.once('destroyed', () => {
-        inputDrafts.delete(e.sender.id)
-        if (!inputDrafts.size && update.pending && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, installing: update.installing })) installUpdate()
-      })
-    } else if (!active) inputDrafts.delete(e.sender.id)
-    if (!inputDrafts.size && update.pending && updater.shouldAutoInstall(update, store.get().settings.updates, { packaged: app.isPackaged, installing: update.installing })) installUpdate()
-  })
-  // 과목 자료 폴더(예: exam-study) — 읽기 전용. 본문은 AI 호출 때만 쓰고 화면에는 요약만 보낸다.
-  const loadStudy = () => courses.loadCourses(store.get().settings.study?.folder || '', A.ymd(new Date()))
-  const weekItems = (days) => {
-    const d = store.get()
-    const today = A.ymd(new Date())
-    return A.occurrences({ events: d.events, remote: d.remote.events, activities: d.activities }, today, A.addDays(today, days - 1))
-  }
-  ipcMain.handle('nf:coach:review', (_e, question, course) => withBusy('coach', () => {
-    const today = A.ymd(new Date())
-    const loaded = loadStudy()
-    const name = loaded.courses.some((c) => c.name === course) ? course : ''
-    return scheduleCoach.review(question, {
-      items: weekItems(7),
-      today,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      llm: llm(),
-      course: name,
-      courseContext: loaded.ok ? courses.buildContext(loaded, { course: name, today }) : '',
-    })
-  }))
-  ipcMain.handle('nf:study:courses', () => {
-    const r = loadStudy()
-    return { ok: r.ok, folder: store.get().settings.study?.folder || '', message: r.message || '', courses: r.ok ? courses.summarize(r) : [] }
-  })
-  ipcMain.handle('nf:study:pick', async () => {
-    const win = manager && !manager.isDestroyed() ? manager : undefined
-    const r = await dialog.showOpenDialog(win, { title: '과목 자료 폴더 (예: exam-study)', properties: ['openDirectory'] })
-    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
-    store.update((d) => (d.settings.study = { ...d.settings.study, folder: r.filePaths[0] }))
-    return { ok: true, folder: r.filePaths[0] }
-  })
-  ipcMain.handle('nf:study:plan', (_e, opts = {}) => withBusy('coach', async () => {
-    const today = A.ymd(new Date())
-    const loaded = loadStudy()
-    if (!loaded.ok) return { ok: false, message: loaded.message || '설정에서 과목 자료 폴더를 지정해 주세요' }
-    const now = new Date()
-    const days = Math.min(14, Math.max(1, Number(opts.days) || 7))
-    return studyPlan.plan({
-      loaded,
-      docs: courses.loadPlanDocs(loaded.root),
-      items: weekItems(days),
-      today,
-      nowMin: now.getHours() * 60 + now.getMinutes(),
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      llm: llm(),
-      course: loaded.courses.some((c) => c.name === opts.course) ? opts.course : '',
-      days,
-      focus: opts.focus,
-    })
-  }))
-
-  // ── 학기 로드맵 역산 (제안 → 승인 → 조각 체크 → 이번 주 배치 → 밀리면 다시 배분) ──
-  ipcMain.handle('nf:roadmap:propose', (_e, opts = {}) => withBusy('roadmap', async () => {
-    const d = store.get()
-    const today = A.ymd(new Date())
-    const loaded = loadStudy()
-    if (!loaded.ok) return { ok: false, message: loaded.message || '설정에서 과목 자료 폴더를 지정해 주세요' }
-    const previous = opts.replanId ? (d.roadmaps || []).find((r) => r.id === opts.replanId) || null : null
-    const course = previous ? previous.course : String(opts.course || '')
-    const target = previous && !opts.date ? previous.target : { label: opts.label, date: opts.date }
-    const r = await roadmap.propose({
-      loaded,
-      course,
-      target,
-      hoursPerWeek: opts.hoursPerWeek ?? previous?.hoursPerWeek,
-      today,
-      notes: loaded.ok ? courses.pickNotes(loaded, course, `${target?.label || ''} 우선순위 ${(loaded.courses.find((c) => c.name === course)?.strategy || '').slice(0, 1500)}`, { max: 4, maxChars: 8000 }) : [],
-      memory: memCtx(),
-      previous,
-      llm: llmClaudeFirst(),
-    })
-    if (r.ok) store.update((x) => (x.roadmapDraft = { ...r.draft, replanId: previous?.id || null }))
-    broadcast()
-    return r.ok ? { ok: true, stages: r.draft.stages.length } : r
-  }))
-  ipcMain.handle('nf:roadmap:draftStage', (_e, stageId) => {
-    store.update((x) => {
-      if (x.roadmapDraft) x.roadmapDraft.stages = x.roadmapDraft.stages.filter((s) => s.id !== stageId)
-    })
-    broadcast()
-    return true
-  })
-  ipcMain.handle('nf:roadmap:decide', (_e, keep) => {
-    const dr = store.get().roadmapDraft
-    if (!dr) return { ok: false, message: '승인할 로드맵이 없어요' }
-    if (keep && !dr.stages.length) return { ok: false, message: '단계가 하나도 없어요' }
-    store.update((x) => {
-      x.roadmapDraft = null
-      if (!keep) return
-      const { replanId, warnings, questions, replan, ...rm } = dr
-      // 같은 과목 로드맵은 새 것으로 바꾼다 (다시 배분이면 끝낸 조각은 archived 로 이어진다)
-      x.roadmaps = [...(x.roadmaps || []).filter((r) => r.id !== replanId && r.course !== rm.course), { ...rm, approvedAt: new Date().toISOString() }]
-    })
-    signal({ type: keep ? 'roadmap-accept' : 'roadmap-drop', title: `${dr.course} ${dr.target.label}`, course: dr.course })
-    broadcast()
-    return { ok: true, message: keep ? '로드맵을 저장했어요' : '제안을 버렸어요' }
-  })
-  ipcMain.handle('nf:roadmap:toggle', (_e, rmId, stageId, ci, si) => {
-    let hit = null
-    store.update((x) => {
-      const st = (x.roadmaps || []).find((r) => r.id === rmId)?.stages.find((s) => s.id === stageId)
-      const step = st?.concepts[ci]?.steps[si]
-      if (!step) return
-      step.done = !step.done
-      step.doneAt = step.done ? new Date().toISOString() : undefined
-      hit = { step, course: (x.roadmaps || []).find((r) => r.id === rmId).course }
-    })
-    if (hit) signal({ type: hit.step.done ? 'step' : 'unstep', title: hit.step.title, minutes: hit.step.minutes, course: hit.course, roadmap: true })
-    broadcast()
-    return !!hit
-  })
-  ipcMain.handle('nf:roadmap:remove', (_e, rmId) => {
-    store.update((x) => (x.roadmaps = (x.roadmaps || []).filter((r) => r.id !== rmId)))
-    broadcast()
-    return true
-  })
-  ipcMain.handle('nf:roadmap:week', (_e, rmId) => withBusy('coach', async () => {
-    const rm = (store.get().roadmaps || []).find((r) => r.id === rmId)
-    if (!rm) return { ok: false, message: '로드맵을 찾지 못했어요' }
-    const today = A.ymd(new Date())
-    const tasks = roadmap.weekSteps(rm, today)
-    if (!tasks.length) return { ok: false, message: '이번 주에 배치할 남은 조각이 없어요' }
-    const loaded = loadStudy()
-    if (!loaded.ok) return { ok: false, message: loaded.message || '설정에서 과목 자료 폴더를 지정해 주세요' }
-    const now = new Date()
-    return studyPlan.plan({
-      loaded,
-      docs: courses.loadPlanDocs(loaded.root),
-      items: weekItems(7),
-      today,
-      nowMin: now.getHours() * 60 + now.getMinutes(),
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      llm: llmClaudeFirst(),
-      course: loaded.courses.some((c) => c.name === rm.course) ? rm.course : '',
-      days: 7,
-      tasks,
-    })
-  }))
-
-  // ── 메모장 → 정리(제안) → 수락 → 쪼개기 ──
-  // 나에 대한 기억 (exam-study 메모리/ + 앱 프로필) — 정리·쪼개기·배운 점에 쓴다
-  const loadMem = () => memory.loadMemory(store.get().settings.study?.folder || '')
-  const memCtx = () => memory.memoryContext(loadMem(), store.get().profile)
-  const signal = (x) => store.update((d) => (d.signals = [...(d.signals || []), { at: new Date().toISOString(), ...x }].slice(-400)))
-  ipcMain.handle('nf:memo:save', (_e, text) => {
-    store.update((d) => (d.memo = { text: String(text ?? '').slice(0, memo.MAX_MEMO), updatedAt: new Date().toISOString() }))
-    broadcast()
-    return true
-  })
-  ipcMain.handle('nf:memo:organize', () => withBusy('memo', async () => {
-    const d = store.get()
-    const today = A.ymd(new Date())
-    const now = new Date()
-    const loaded = loadStudy()
-    const r = await memo.organize({
-      text: d.memo?.text || '',
-      today,
-      now: A.hm(now),
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      items: weekItems(14),
-      courses: loaded.ok ? loaded.courses.map((c) => c.name) : [],
-      memory: memCtx(),
-      llm: llmClaudeFirst(),
-    })
-    if (r.ok) store.update((x) => {
-      x.memoCandidates = r.candidates
-      x.memoQuestions = r.questions || []
-    })
-    broadcast()
-    return { ok: r.ok, message: r.message, count: r.candidates?.length || 0, source: r.source }
-  }))
-  ipcMain.handle('nf:memo:decide', async (_e, id, action, edits = {}) => {
-    const d = store.get()
-    const c = (d.memoCandidates || []).find((x) => x.id === id)
-    if (!c) return { ok: false, message: '이미 처리한 후보예요' }
-    const today = A.ymd(new Date())
-    if (action === 'drop') {
-      signal({ type: 'drop', title: c.title, course: c.course, fit: c.fit })
-      store.update((x) => {
-        x.memoCandidates = x.memoCandidates.filter((y) => y.id !== id)
-        x.memo = { ...x.memo, text: memo.markLines(x.memo.text, c.lines, memo.MARK_DROP) }
-      })
-      broadcast()
-      return { ok: true, message: '버렸어요 (메모 줄에 ✗ 표시)' }
-    }
-    const v = memo.shape({ ...c, ...edits, id: c.id, lines: c.lines, source: c.source }, today)
-    if (!v.title) return { ok: false, message: '제목을 입력해 주세요' }
-    const title = v.course && !v.title.startsWith('[') ? `[${v.course}] ${v.title}` : v.title
-    const r = await commitInput(
-      v.kind === 'event'
-        ? { kind: 'event', title, date: v.date, start: v.start, minutes: v.minutes || 60, note: v.note }
-        : { kind: 'task', title, date: v.date, minutes: v.minutes }
-    )
-    if (!r?.ok) return r || { ok: false, message: '저장하지 못했어요' }
-    const changed = ['title', 'date', 'start', 'minutes'].filter((k) => (v[k] ?? null) !== (c[k] ?? null))
-    signal({ type: 'accept', title: v.title, course: v.course, kind: v.kind, minutes: v.minutes, changed, from: changed.length ? { date: c.date, start: c.start, minutes: c.minutes } : undefined, fit: v.fit })
-    store.update((x) => {
-      x.memoCandidates = x.memoCandidates.filter((y) => y.id !== id)
-      x.memo = { ...x.memo, text: memo.markLines(x.memo.text, c.lines, memo.MARK_DONE) }
-      x.plans = [...(x.plans || []), { id: uid(), title, course: v.course, kind: v.kind, date: v.date, start: v.start, minutes: v.minutes, note: v.note, approach: v.approach, fit: v.fit, fitWhy: v.fitWhy, gain: v.gain, vision: v.vision, next: v.next, lines: v.lines, createdAt: new Date().toISOString(), tree: null }].slice(-50)
-    })
-    broadcast()
-    return { ok: true, message: v.kind === 'event' ? '구글 캘린더(또는 앱 일정)에 넣었어요' : '앱 할 일에 넣었어요' }
-  })
-  ipcMain.handle('nf:plan:breakdown', (_e, ids) => withBusy('memo', async () => {
-    const d = store.get()
-    const want = Array.isArray(ids) && ids.length ? ids : (d.plans || []).filter((p) => !p.tree).map((p) => p.id)
-    const plans = (d.plans || []).filter((p) => want.includes(p.id))
-    const loaded = loadStudy()
-    const today = A.ymd(new Date())
-    const r = await memo.breakdown({
-      plans,
-      contextFor: (course) => (loaded.ok ? courses.buildContext(loaded, { course, today, maxChars: 6000 }) : ''),
-      notesFor: (p) => (loaded.ok && p.course ? courses.pickNotes(loaded, p.course, [p.title, p.note, p.approach, ...(p.lines || [])].join(' '), { max: 3, maxChars: 6000 }) : []),
-      memory: memCtx(),
-      llm: llmClaudeFirst(),
-    })
-    if (r.ok) store.update((x) => {
-      for (const p of x.plans || []) if (r.trees[p.id]) p.tree = r.trees[p.id]
-    })
-    broadcast()
-    return { ok: r.ok, message: r.message, count: r.ok ? Object.keys(r.trees).length : 0 }
-  }))
-  ipcMain.handle('nf:plan:toggle', (_e, planId, ci, si) => {
-    store.update((x) => {
-      const plan = (x.plans || []).find((p) => p.id === planId)
-      const step = plan?.tree?.concepts?.[ci]?.steps?.[si]
-      if (!step) return
-      step.done = !step.done
-      step.doneAt = step.done ? new Date().toISOString() : null
-      x.signals = [...(x.signals || []), { at: new Date().toISOString(), type: step.done ? 'step' : 'unstep', title: step.title, minutes: step.minutes, course: plan.course, concept: plan.tree.concepts[ci].title }].slice(-400)
-    })
-    broadcast()
-    return true
-  })
-  ipcMain.handle('nf:plan:remove', (_e, planId) => {
-    store.update((x) => (x.plans = (x.plans || []).filter((p) => p.id !== planId)))
-    broadcast()
-    return true
-  })
-  ipcMain.handle('nf:memory:get', () => {
-    const mem = loadMem()
-    const d = store.get()
-    return { ok: mem.ok, folder: mem.folder, hasProfile: !!mem.profile, hasWorkstyle: !!mem.workstyle, hasCareer: !!mem.career, vision: mem.vision.slice(0, 600), learned: memory.learnedList(mem).slice(-30), stats: memory.statsText(memory.stats(d.signals || [], d.plans || [])), proposals: d.learnProposals || [] }
-  })
-  ipcMain.handle('nf:memory:reflect', () => withBusy('memo', async () => {
-    const d = store.get()
-    const r = await memory.reflect({ signals: d.signals || [], plans: d.plans || [], mem: loadMem(), appProfile: d.profile, llm: llmClaudeFirst() })
-    if (r.ok) store.update((x) => (x.learnProposals = r.notes.map((n) => ({ id: uid(), ...n }))))
-    broadcast()
-    return { ok: r.ok, message: r.message, count: r.notes?.length || 0 }
-  }))
-  ipcMain.handle('nf:memory:decide', (_e, id, keep, text) => {
-    const p = (store.get().learnProposals || []).find((x) => x.id === id)
-    if (!p) return { ok: false, message: '이미 처리했어요' }
-    if (keep) {
-      const folder = store.get().settings.study?.folder || ''
-      if (!folder) return { ok: false, message: '설정에서 과목 자료 폴더(exam-study)를 연결해야 메모리/학습노트.md 에 저장돼요' }
-      const w = memory.appendLearned(folder, [String(text || p.text)], A.ymd(new Date()))
-      if (!w.ok) return w
-    }
-    store.update((x) => (x.learnProposals = (x.learnProposals || []).filter((y) => y.id !== id)))
-    broadcast()
-    return { ok: true, message: keep ? '메모리/학습노트.md 에 기억했어요' : '버렸어요' }
-  })
-  // 위젯 메모: Windows 고정 위젯은 평소 키보드 포커스를 받지 않는다 → 메모를 누를 때만 잠시 받게
-  ipcMain.handle('nf:widget:focus', (e, on) => {
-    if (!widget || widget.isDestroyed() || e.sender !== widget.webContents) return false
-    if (IS_WIN && widgetMode === 'pinned') {
-      widget.setFocusable(!!on)
-      if (on) widget.focus()
-    }
-    return true
-  })
-
-  // PIN 해제 — 5번 틀리면 30초 대기
-  let fails = 0
-  let waitUntil = 0
-  ipcMain.handle('nf:security:unlock', (_e, pin) => {
-    if (Date.now() < waitUntil) return { ok: false, message: `잠시 후 다시 시도하세요 (${Math.ceil((waitUntil - Date.now()) / 1000)}초)` }
-    if (security.verifyPin(String(pin || ''), store.get().settings.security.pinHash)) {
-      fails = 0
-      sessionLocked = false
-      broadcast()
-      return { ok: true }
-    }
-    fails++
-    if (fails >= 5) {
-      waitUntil = Date.now() + 30000
-      fails = 0
-    }
-    return { ok: false, message: 'PIN 이 맞지 않아요' }
-  })
-  ipcMain.handle('nf:security:set-pin', (_e, pin) => {
-    const p = String(pin || '')
-    if (p && !/^\d{4,8}$/.test(p)) return { ok: false, message: 'PIN 은 숫자 4~8자리' }
-    store.update((d) => (d.settings.security.pinHash = p ? security.hashPin(p) : ''))
-    buildTray()
-    return { ok: true }
-  })
-  ipcMain.handle('nf:security:lock', () => lockSession('직접'))
-  ipcMain.handle('nf:security:privacy', () => togglePrivacy())
-  ipcMain.handle('nf:security:apply', () => [widget, manager, quick].forEach(protect))
-  ipcMain.handle('nf:data:export', async () => {
-    const r = await dialog.showSaveDialog(manager || undefined, { defaultPath: `neural-flow-백업-${A.ymd(new Date())}.json` })
-    if (r.canceled || !r.filePath) return { ok: false }
-    const { settings, account, ...rest } = store.get()
-    const { geminiKeyEnc, geminiKeyPlain, google, security: sec, ...safeSettings } = settings
-    fs.writeFileSync(r.filePath, JSON.stringify({ exportedAt: new Date().toISOString(), settings: safeSettings, ...rest }, null, 2), { mode: 0o600 })
-    return { ok: true, path: r.filePath }
-  })
-  ipcMain.handle('nf:data:wipe', async () => {
-    // 구글 토큰 폐기 → 데이터 파일 삭제 → 다시 시작
-    const refresh = dec(store.get().account?.refreshEnc)
-    if (refresh) await fetch(`${process.env.NF_GOOGLE_REVOKE || 'https://oauth2.googleapis.com/revoke'}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `token=${encodeURIComponent(refresh)}` }).catch(() => {})
-    try {
-      fs.rmSync(store.file, { force: true })
-    } catch {}
-    if (TEST_HOOK) return { ok: true }
-    app.relaunch()
-    app.exit(0)
-  })
-  ipcMain.handle('nf:update:check', () => checkUpdate({ manual: true }))
-  ipcMain.handle('nf:update:install', () => installUpdate())
-  ipcMain.handle('nf:update:skip', () => store.update((d) => (d.settings.updates.skipVersion = update.version || '')))
-
-  // 로그인 설정(클라이언트 ID/시크릿)은 잠금 화면에서 입력한다
-  ipcMain.handle('nf:auth:config', (_e, { clientId, clientSecret } = {}) => {
+  ipcMain.handle('nf:refresh', () => refresh())
+  ipcMain.handle('nf:notion:open', () => openNotion())
+  ipcMain.handle('nf:settings:open', () => openSettings())
+  ipcMain.handle('nf:notion:token', async (_e, value) => {
+    const t = String(value || '').trim()
+    if (t && !/^(secret_|ntn_)[A-Za-z0-9]{20,}$/.test(t)) return { ok: false, message: "Notion 통합 토큰은 'ntn_' 또는 'secret_' 으로 시작해요" }
     store.update((d) => {
-      if (clientId !== undefined) d.settings.google.clientId = String(clientId).trim()
-      if (clientSecret !== undefined) {
-        const v = enc(String(clientSecret).trim())
-        d.settings.google.clientSecretEnc = v
-        d.settings.google.clientSecretPlain = ''
-      }
+      d.settings.notion.tokenEnc = enc(t)
+      if (!t) d.board = null
     })
-    gclient = null
+    return t ? refresh() : { ok: true, cleared: true }
   })
-  // 간편 모드: 로그인 없이 iCal 주소로 구글 캘린더를 읽기만 한다
-  ipcMain.handle('nf:auth:simple', async (_e, icsUrl) => {
-    const url = String(icsUrl || '').trim()
-    if (!/^(https?|webcal):\/\//i.test(url)) return { ok: false, message: 'iCal 주소(https://…ics)를 붙여넣어 주세요' }
-    store.update((d) => {
-      d.settings.requireLogin = false
-      d.settings.icsUrls = [...new Set([...(d.settings.icsUrls || []), url])]
-    })
-    await runCalendar()
-    const n = (store.get().remote.events || []).length
-    return { ok: true, count: n }
-  })
-  ipcMain.handle('nf:auth:signin', async () => {
-    const g = store.get().settings.google
-    setBusy('signin', true)
-    try {
-      const r = await google.signIn({
-        clientId: g.clientId,
-        clientSecret: dec(g.clientSecretEnc) || g.clientSecretPlain,
-        allowedEmails: g.allowedEmails,
-        openUrl: (url) => (TEST_HOOK && process.env.NF_TEST_OPEN_URL === 'fetch' ? fetch(url).catch(() => {}) : shell.openExternal(url)),
-      })
-      store.update((d) => {
-        d.account = { email: r.email, name: r.name, picture: r.picture, refreshEnc: enc(r.refreshToken) }
-        if (!d.settings.google.allowedEmails?.length) d.settings.google.allowedEmails = [r.email] // 첫 로그인 계정을 주인으로
-      })
-      gclient = new google.GoogleClient({ clientId: g.clientId, clientSecret: dec(g.clientSecretEnc) || g.clientSecretPlain, refreshToken: r.refreshToken, accessToken: r.accessToken, expiresAt: r.expiresAt })
-      runCalendar()
-      return { ok: true, email: r.email }
-    } catch (e) {
-      return { ok: false, message: e.message }
-    } finally {
-      setBusy('signin', false)
-    }
-  })
-  ipcMain.handle('nf:auth:signout', () => {
-    gclient = null
-    store.update((d) => {
-      d.account = null
-      d.remote = { ...d.remote, events: (d.remote.events || []).filter((e) => e.source !== 'google') }
-    })
-  })
-
-  ipcMain.handle('nf:input:preview', (_e, text) => previewInput(text))
-  ipcMain.handle('nf:input:commit', (_e, item) => commitInput(item))
-  ipcMain.handle('nf:quick:hide', () => quick?.hide())
-  ipcMain.handle('nf:quick:open', () => toggleQuick())
-  ipcMain.handle('nf:google:delete', async (_e, calendarId, eventId) => {
-    await googleClient()?.deleteEvent(calendarId, eventId)
-    await runCalendar()
-  })
-  ipcMain.handle('nf:engine:detect', async () => {
-    await detectEngines()
-    return { claudeVersion, codexStatus }
-  })
-
-  ipcMain.handle('nf:event:save', (_e, ev) => {
-    store.update((d) => {
-      const clean = {
-        id: ev.id || uid(),
-        title: String(ev.title || '').trim() || '(제목 없음)',
-        date: ev.date,
-        start: ev.start || null,
-        end: ev.end || null,
-        domain: ev.domain || '',
-        note: ev.note || '',
-        repeat: ev.repeat || null,
-        until: ev.until || null,
-        deadline: !!ev.deadline,
-        source: 'local',
-      }
-      const i = d.events.findIndex((x) => x.id === clean.id)
-      if (i >= 0) d.events[i] = clean
-      else d.events.push(clean)
-    })
-  })
-  ipcMain.handle('nf:event:delete', (_e, id) => store.update((d) => (d.events = d.events.filter((x) => x.id !== id))))
-
-  ipcMain.handle('nf:activity:save', (_e, a) => {
-    store.update((d) => {
-      const clean = {
-        id: a.id || uid(),
-        name: String(a.name || '').trim() || '(이름 없음)',
-        domain: a.domain || '',
-        priority: a.priority || '중간',
-        energy: a.energy || '가벼움',
-        repeat: a.repeat || '1회',
-        min: a.min ? Number(a.min) : null,
-        date: a.date || null,
-        start: a.start || null,
-        status: a.status || '제안됨',
-        why: a.why || '',
-      }
-      // 날짜를 잡으면 '예정됨'으로 (승인 → 캘린더 배치)
-      if (clean.date && (clean.status === '제안됨' || clean.status === '승인됨')) clean.status = '예정됨'
-      const i = d.activities.findIndex((x) => x.id === clean.id)
-      if (i >= 0) d.activities[i] = clean
-      else d.activities.push(clean)
-    })
-  })
-  ipcMain.handle('nf:activity:delete', (_e, id) =>
-    store.update((d) => (d.activities = d.activities.filter((x) => x.id !== id)))
-  )
-  // 날짜가 지난 미완료 활동 → 보류 (지우지 않는다)
-  ipcMain.handle('nf:activity:archive-stale', () => {
-    const today = A.ymd(new Date())
-    let n = 0
-    store.update((d) => {
-      for (const a of d.activities)
-        if (a.date && a.date < today && a.status !== '완료' && a.status !== '보류') {
-          a.status = '보류'
-          n++
-        }
-    })
-    return n
-  })
-  ipcMain.handle('nf:activity:status', (_e, id, status) =>
-    store.update((d) => {
-      const a = d.activities.find((x) => x.id === id)
-      if (a) a.status = status
-    })
-  )
-
-  // 캘린더 항목 완료 토글 (로컬 일정은 날짜별, 활동은 상태로)
-  ipcMain.handle('nf:occurrence:toggle', (_e, key) =>
-    store.update((d) => {
-      if (key.startsWith('a:')) {
-        const a = d.activities.find((x) => x.id === key.slice(2))
-        if (a) a.status = a.status === '완료' ? '예정됨' : '완료'
-        return
-      }
-      d.doneMap = d.doneMap || {}
-      if (d.doneMap[key]) delete d.doneMap[key]
-      else d.doneMap[key] = true
-    })
-  )
-
-  ipcMain.handle('nf:onething:toggle', () =>
-    store.update((d) => {
-      if (!d.brief) return
-      d.brief.done = !d.brief.done
-      recordHistory(d, d.brief)
-    })
-  )
-  ipcMain.handle('nf:onething:set', (_e, text) =>
-    store.update((d) => {
-      const today = A.ymd(new Date())
-      d.brief = { ...(d.brief && d.brief.date === today ? d.brief : { date: today, mode: 'daily' }), one_thing: text, done: false, source: 'manual' }
-      recordHistory(d, d.brief)
-    })
-  )
-
-  ipcMain.handle('nf:run', (_e, job) => {
-    const map = { calendar: runCalendar }
-    return map[job] ? map[job]() : null
-  })
-
   ipcMain.handle('nf:settings:save', (_e, patch = {}) => {
-    const icsBefore = JSON.stringify(store.get().settings.icsUrls) // 값으로 복사 (객체는 아래에서 바뀜)
     store.update((d) => {
-      const { widget: w, schedule: sc, google: g, security: sec, updates: up, coach: co, geminiKeyEnc, geminiKeyPlain, ...rest } = patch
-      if (sec) {
-        const { pinHash, hasPin, canEncrypt, ...safe } = sec // PIN 은 nf:security:set-pin 으로만
-        Object.assign(d.settings.security, safe)
+      const s = d.settings
+      if (patch.notion) {
+        if (patch.notion.page !== undefined) {
+          const p = String(patch.notion.page || '').trim()
+          s.notion.page = p && notion.pageIdOf(p) ? p : ''
+        }
+        if (['app', 'web'].includes(patch.notion.openIn)) s.notion.openIn = patch.notion.openIn
+        if (patch.notion.refreshMinutes !== undefined) s.notion.refreshMinutes = Math.min(240, Math.max(5, Number(patch.notion.refreshMinutes) || 30))
       }
-      if (up) Object.assign(d.settings.updates, up)
-      if (co) Object.assign(d.settings.coach, co)
-      Object.assign(d.settings, rest)
-      if (w) Object.assign(d.settings.widget, w)
-      if (sc) Object.assign(d.settings.schedule, sc)
-      if (g) {
-        const { clientSecretEnc, clientSecretPlain, hasSecret, ...safe } = g // 시크릿은 nf:auth:config 로만
-        Object.assign(d.settings.google, safe)
+      if (patch.widget) {
+        const w = patch.widget
+        if (w.width !== undefined) s.widget.width = Math.min(520, Math.max(300, Number(w.width) || 360))
+        if (w.opacity !== undefined) s.widget.opacity = Math.min(1, Math.max(0.3, Number(w.opacity) || 0.72))
+        if (['auto', 'light', 'dark'].includes(w.theme)) s.widget.theme = w.theme
       }
+      if (patch.updates) for (const k of ['autoCheck', 'autoInstall']) if (typeof patch.updates[k] === 'boolean') s.updates[k] = patch.updates[k]
+      if (typeof patch.autoStart === 'boolean') s.autoStart = patch.autoStart
+      if (typeof patch.security?.contentProtection === 'boolean') s.security.contentProtection = patch.security.contentProtection
     })
-    const after = store.get().settings
-    if (patch.widget?.theme) nativeTheme.themeSource = after.widget.theme === 'auto' ? 'system' : after.widget.theme
-    if (patch.widget && 'width' in patch.widget) createWidget()
-    if (patch.widget && 'clickThrough' in patch.widget) applyClickThrough()
-    if (patch.security && 'contentProtection' in patch.security) [widget, manager, quick].forEach(protect)
-    if (patch.security && 'encryptData' in patch.security) store.flush()
-    if ('autoStart' in patch) applyAutoStart()
-    if (icsBefore !== JSON.stringify(after.icsUrls) || patch.google?.calendarIds !== undefined) runCalendar()
-    if (patch.engine || patch.claudeCmd || patch.codexCmd) detectEngines()
-    buildTray()
-  })
-
-  ipcMain.handle('nf:key:set', async (_e, key) => {
-    setKey(String(key || '').trim())
-    if (!key) return { ok: true }
-    try {
-      await brain.testKey({ ...llm(), provider: 'gemini' }) // 키 테스트는 항상 Gemini 로
-      return { ok: true }
-    } catch (e) {
-      return { ok: false, message: e.message }
-    }
-  })
-
-  ipcMain.handle('nf:open', (_e, view) => openManager(view))
-  ipcMain.handle('nf:link', (_e, url) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    const s = store.get().settings
+    if (patch.widget?.width !== undefined) createWidget()
+    if (patch.widget?.theme) nativeTheme.themeSource = s.widget.theme === 'auto' ? 'system' : s.widget.theme
+    if (patch.autoStart !== undefined) applyAutoStart()
+    if (patch.security) [widget, settingsWin].forEach(protect)
+    if (patch.notion?.refreshMinutes !== undefined) scheduleRefresh()
+    if (patch.notion?.page !== undefined) refresh()
+    return snapshot().settings
   })
   ipcMain.handle('nf:widget:resize', (e, height) => {
     if (!widget || widget.isDestroyed() || e.sender !== widget.webContents) return
-    const b = widgetBounds(Math.ceil(height))
+    const b = widgetBounds(Math.max(120, Math.round(Number(height) || 0)))
     widget.setBounds({ ...widget.getBounds(), height: b.height })
   })
-  ipcMain.handle('nf:widget:mode', (_e, mode) => setWidgetMode(mode))
+  ipcMain.handle('nf:widget:mode', (_e, mode) => setWidgetMode(mode === 'edit' ? 'edit' : 'pinned'))
+  ipcMain.handle('nf:update:check', () => checkUpdate({ manual: true }))
+  ipcMain.handle('nf:update:install', () => installUpdate())
+  ipcMain.handle('nf:update:skip', () => store.update((d) => (d.settings.updates.skipVersion = update.version || '')))
 }
 
 function applyAutoStart() {
@@ -1242,21 +385,13 @@ function applyAutoStart() {
   else if (IS_WIN) app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: [app.getAppPath()] })
 }
 
-async function detectEngines() {
-  const s = store.get().settings
-  const [codex, claude] = await Promise.all([detectCodex(process.env.NF_CODEX_CMD || s.codexCmd), detectClaude(process.env.NF_CLAUDE_CMD || s.claudeCmd)])
-  codexStatus = codex
-  claudeVersion = claude
-  broadcast()
-}
-
 // ── 시작 ─────────────────────────────────────────────────────────────────────
-app.on('second-instance', () => openManager())
+app.on('second-instance', () => openSettings())
 app.on('window-all-closed', () => {}) // 창을 모두 닫아도 트레이에 상주
 app.on('will-quit', () => globalShortcut.unregisterAll())
 app.on('web-contents-created', (_e, wc) => {
   wc.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    if (/^https:\/\/(www\.)?notion\.so\//i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
   wc.on('will-navigate', (ev) => ev.preventDefault())
@@ -1264,15 +399,12 @@ app.on('web-contents-created', (_e, wc) => {
 
 app.whenReady().then(async () => {
   if (IS_MAC) app.dock?.hide()
-  // 저장 파일 암호화 (OS 키체인). 안 되는 환경(키링 없는 Linux 등)에서는 평문 + 권한 600
+  // 저장 파일 암호화 (OS 키체인). 안 되는 환경에서는 평문 + 권한 600
   const cipher = safeStorage.isEncryptionAvailable()
     ? { encrypt: (str) => safeStorage.encryptString(str), decrypt: (buf) => safeStorage.decryptString(buf) }
     : null
   store = new Store(process.env.NF_DATA_DIR || app.getPath('userData'), { cipher }).load()
-  store.flush() // 옛 평문 파일이면 바로 암호화
-  applyBuildConfig()
   hardenSession()
-  if (store.get().settings.security.pinHash) sessionLocked = true // 켤 때마다 PIN
   const theme = store.get().settings.widget.theme
   nativeTheme.themeSource = theme === 'auto' ? 'system' : theme
 
@@ -1281,27 +413,18 @@ app.whenReady().then(async () => {
   createWidget()
   buildTray()
   applyAutoStart()
-  startSecurityWatch()
   startUpdateWatch()
 
   globalShortcut.register('CommandOrControl+Alt+N', () => setWidgetMode(widgetMode === 'edit' ? 'pinned' : 'edit'))
-  globalShortcut.register('CommandOrControl+Alt+M', () => openManager())
-  globalShortcut.register('CommandOrControl+Alt+P', () => togglePrivacy())
-  try {
-    globalShortcut.register(store.get().settings.quickShortcut || 'CommandOrControl+Shift+Space', toggleQuick)
-  } catch (e) {
-    console.warn('[quick] 단축키 등록 실패:', e.message)
-  }
-  detectEngines()
+  globalShortcut.register('CommandOrControl+Alt+M', () => openSettings())
 
-  // 잠겨 있는 동안(로그인 전)에는 자동 작업·알림을 돌리지 않는다
-  const lockedJobs = Object.fromEntries(Object.entries(jobs).map(([k, fn]) => [k, (...a) => (locked() ? undefined : fn(...a))]))
-  const scheduler = createScheduler(store, lockedJobs)
-  if (!TEST_HOOK) scheduler.start()
-  // 절전 복귀·화면 구성 변경 시 날짜/위치 갱신
-  powerMonitor.on('resume', () => scheduler.tick())
+  // 켤 때 · 주기적으로 · 절전 복귀 · 화면 잠금 해제 때 다시 읽는다
+  if (!TEST_HOOK) refresh()
+  scheduleRefresh()
+  powerMonitor.on('resume', () => !TEST_HOOK && refresh())
+  powerMonitor.on('unlock-screen', () => !TEST_HOOK && refresh())
   screen.on('display-removed', () => createWidget())
 
-  if (DEV || locked()) openManager('today')
-  if (TEST_HOOK) require(path.resolve(TEST_HOOK)).run({ app, store, getWidget: () => widget, openManager, getManager: () => manager, setWidgetMode, jobs, toggleQuick, getQuick: () => quick })
+  if (DEV || (!store.get().settings.notion.tokenEnc && !TEST_HOOK)) openSettings()
+  if (TEST_HOOK) require(path.resolve(TEST_HOOK)).run({ app, store, getWidget: () => widget, openSettings, getSettings: () => settingsWin, setWidgetMode, refresh })
 })

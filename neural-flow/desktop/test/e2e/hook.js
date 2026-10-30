@@ -1,71 +1,56 @@
 // E2E 훅 — 실제 Electron 앱 안에서 IPC 경로(window.nf)를 그대로 호출해 검증한다.
-// launch.js 가 NF_TEST_HOOK 으로 이 파일을 넘기면 main.js 가 스케줄러를 끄고 run() 을 부른다.
-// 외부 네트워크 없이: 가짜 Gemini · 구글(로그인·캘린더) · ICS · RSS 를 로컬 서버로, Claude Code 는 가짜 CLI 로.
+// launch.js 가 NF_TEST_HOOK 으로 이 파일을 넘기면 main.js 가 run() 을 부른다.
+// 외부 네트워크 없이: 가짜 Notion API · 가짜 업데이트 서버를 로컬에 띄운다.
 
 const fs = require('fs')
 const path = require('path')
 const http = require('http')
+const crypto = require('crypto')
 const { execFileSync } = require('child_process')
-const A = require('../../renderer/shared/agenda.js')
 
 const PORT = Number(process.env.NF_E2E_PORT || 47811)
 const SHOT_DIR = process.env.NF_SHOT_DIR // 있으면 화면 캡처 저장
-const OWNER = 'jun1234sang@gmail.com' // neural-flow/config.json 의 userEmail
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-const today = A.ymd(new Date())
-const tomorrow = A.addDays(today, 1)
-const compact = (d) => d.replace(/-/g, '')
-const at = (day, hh) => new Date(`${day}T${hh}:00`).toISOString() // 로컬 시각 → ISO
-
-const ICS = `BEGIN:VCALENDAR
-VERSION:2.0
-X-WR-CALNAME:공유
-BEGIN:VEVENT
-UID:i1
-DTSTART;VALUE=DATE:${compact(A.addDays(today, 2))}
-DTEND;VALUE=DATE:${compact(A.addDays(today, 3))}
-RRULE:FREQ=WEEKLY;COUNT=2
-SUMMARY:주간 종일 이벤트
-END:VEVENT
-END:VCALENDAR`
-
-const UPDATE_BYTES = Buffer.from('fake installer')
-const RSS = `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
-${[1, 2, 3].map((i) => `<item><title>테스트 뉴스 ${i}</title><link>https://example.com/${i}</link><pubDate>${new Date(Date.now() - i * 3600e3).toUTCString()}</pubDate></item>`).join('')}
-</channel></rss>`
-
-function geminiReply(prompt) {
-  if (prompt.includes('일정 코치')) return { answer: '겹침과 이동 시간을 확인하세요.', observations: [], questions: ['장소가 정해졌나요?'] }
-  if (prompt.includes('일정 비서')) return { kind: 'event', title: '커피챗', date: tomorrow, start: '15:00', minutes: 60, domain: '🤝 관계·사랑', reply: 'ok' }
-  if (prompt.includes('영어 회화 코치'))
-    return {
-      expression: "Let's touch base tomorrow.",
-      meaning: '내일 잠깐 이야기 나눠요.',
-      situation: '짧게 진행 상황을 맞출 때',
-      dialogue: [
-        { speaker: 'A', en: "Let's touch base tomorrow.", ko: '내일 잠깐 얘기해요.' },
-        { speaker: 'B', en: 'Sounds good. 10 a.m.?', ko: '좋아요. 10시 어때요?' },
-      ],
-      variations: ["Let's sync up."],
-      tip: 'touch base = 가볍게 연락/점검',
-    }
-  if (prompt.includes('헤드라인')) return { bullets: ['요약 1', '요약 2', '요약 3'], pick: { title: '테스트 뉴스 1', why: '이유' } }
-  const base = { greeting: '오늘도 거룩=집중.', one_thing: 'MOCK: 포트폴리오 케이스 1개 완성', one_thing_why: 'MOCK 이유', holiness_line: 'MOCK 거룩', stuck_coaching: 'MOCK 코칭', trend: 'MOCK 트렌드' }
-  if (prompt.includes('[주간 모드]'))
-    base.recommendations = [
-      { name: 'MOCK 추천 활동 A', domain: '🫀 신체·건강', why: '운동', priority: '중간', energy: '루틴', min: 30 },
-      { name: 'MOCK 추천 활동 B', domain: '💰 재정·경제', why: '예산', priority: '낮음', energy: '가벼움', min: 20 },
-    ]
-  return base
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const addDays = (n) => {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setDate(d.getDate() + n)
+  return d
+}
+const today = ymd(new Date())
+const WD = ['일', '월', '화', '수', '목', '금', '토']
+const md = (n) => {
+  const d = addDays(n)
+  return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')} ${WD[d.getDay()]}`
 }
 
-// ── 가짜 서버 ────────────────────────────────────────────────────────────────
-const mock = { userEmail: OWNER, revoked: 0, created: [], tokenCalls: 0 }
-const CALS = [
-  { id: 'me@x', summary: '준상', primary: true, backgroundColor: '#3182f6', accessRole: 'owner', selected: true },
-  { id: 'work', summary: '회사', backgroundColor: '#f04452', accessRole: 'reader', selected: true },
-  { id: 'hidden', summary: '숨김', backgroundColor: '#999999', accessRole: 'reader', selected: false },
+const TOKEN = 'ntn_' + 'a1B2c3D4e5'.repeat(4)
+const PAGE_ID = '3d8b9019035781acb237e2d609a7f276'
+const OTHER_PAGE = '11112222333344445555666677778888'
+const BOARD_ID = 'cafe0000-1111-2222-3333-444455556666'
+const rt = (...t) => t.map((x) => ({ plain_text: x }))
+const bullet = (a, b) => ({ type: 'bulleted_list_item', bulleted_list_item: { rich_text: rt(a, b) } })
+
+// 어제 줄이 남아 있는 보드 (아침 갱신 전 상황) + 오늘부터 6일
+const PAGE = [
+  { id: 'h1', type: 'heading_3', heading_3: { rich_text: rt('✍️ 오늘') } },
+  { id: 'h7', type: 'heading_3', heading_3: { rich_text: rt('📅 앞으로 7일') } },
+  { id: BOARD_ID, type: 'callout', has_children: true, callout: { rich_text: rt(`${md(-1)} – ${md(5)}`, ' · 정규 수업 제외 · 매일 아침 자동 갱신') } },
 ]
+const BOARD = [
+  bullet(md(-1), '　18:00 어제 지난 일'),
+  bullet(md(0), '　11:00 [마감] 모두의창업 웹사이트 1차 제작 · 15:00 활동보고서 작성 · 18:00 2차 정산금 입금 확인'),
+  bullet(md(1), '　09:00 AI_TOP_100 예선 입장·사전준비 · 10:00 [필수] AI_TOP_100 예선'),
+  bullet(md(2), '　23:59 [마감] 국민대 캠타 CRE-AI-TIVE 참가 신청'),
+  bullet(md(3), '　19:00 지속가능도시론 2차 퀴즈 준비 · 21:00 [마감] 도시빅데이터분석 프로젝트 제안서 · 종일 도시빅데이터분석 기획안'),
+  bullet(md(4), '　종일 영캠 모임'),
+  { type: 'paragraph', paragraph: { rich_text: rt('과제안내: 대중교통현장관찰조사 …') } },
+  bullet(md(5), '　13:30 도빅분 프로젝트 중간 체크인(예정) · 종일 예비군'),
+]
+
+const UPDATE_BYTES = Buffer.from('fake installer')
+const mock = { notionCalls: 0, badAuth: 0 }
 
 function startServer() {
   const json = (res, code, obj) => {
@@ -74,576 +59,163 @@ function startServer() {
   }
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      const url = new URL(req.url, `http://127.0.0.1:${PORT}`)
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
-        const p = url.pathname
-        if (p === '/cal.ics') return res.writeHead(200, { 'Content-Type': 'text/calendar' }), res.end(ICS)
-        if (p.startsWith('/repos/')) {
-          const sha = require('crypto').createHash('sha256').update(UPDATE_BYTES).digest('hex')
-          const a = (name) => ({ name, browser_download_url: `http://127.0.0.1:${PORT}/dl`, size: UPDATE_BYTES.length, digest: `sha256:${sha}` })
-          return json(res, 200, [{ tag_name: 'desktop-v9.9.9', draft: false, prerelease: false, html_url: 'x', body: '테스트', assets: [a('neural-flow-9.9.9-win-x64.exe'), a('neural-flow-9.9.9-mac-arm64.dmg'), a('neural-flow-9.9.9-mac-x64.dmg')] }])
+      const p = new URL(req.url, `http://127.0.0.1:${PORT}`).pathname
+      if (p.startsWith('/repos/')) {
+        const sha = crypto.createHash('sha256').update(UPDATE_BYTES).digest('hex')
+        const a = (name) => ({ name, browser_download_url: `http://127.0.0.1:${PORT}/dl`, size: UPDATE_BYTES.length, digest: `sha256:${sha}` })
+        return json(res, 200, [{ tag_name: 'desktop-v9.9.9', draft: false, prerelease: false, html_url: 'x', body: '테스트', assets: [a('neural-flow-9.9.9-win-x64.exe'), a('neural-flow-9.9.9-mac-arm64.dmg'), a('neural-flow-9.9.9-mac-x64.dmg')] }])
+      }
+      if (p === '/dl') return res.writeHead(200), res.end(UPDATE_BYTES)
+      const m = /^\/v1\/blocks\/([^/]+)\/children$/.exec(p)
+      if (m) {
+        mock.notionCalls++
+        if (req.headers.authorization !== `Bearer ${TOKEN}` || req.headers['notion-version'] !== '2022-06-28') {
+          mock.badAuth++
+          return json(res, 401, { message: 'API token is invalid.' })
         }
-        if (p === '/dl') return res.writeHead(200), res.end(UPDATE_BYTES)
-        if (p === '/feed.xml') return res.writeHead(200, { 'Content-Type': 'application/rss+xml' }), res.end(RSS)
-        // 구글 OAuth
-        if (p === '/o/auth') {
-          const q = url.searchParams
-          const ok = q.get('code_challenge_method') === 'S256' && q.get('client_id') === 'cid'
-          res.writeHead(302, { Location: `${q.get('redirect_uri')}?${ok ? 'code=c1' : 'error=bad_request'}&state=${q.get('state')}` })
-          return res.end()
-        }
-        if (p === '/o/token') {
-          mock.tokenCalls++
-          const f = new URLSearchParams(body)
-          if (f.get('client_secret') !== 'sec') return json(res, 401, { error: 'invalid_client' })
-          return json(res, 200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 })
-        }
-        if (p === '/o/userinfo') return json(res, 200, { email: mock.userEmail, email_verified: true, name: '준상' })
-        if (p === '/o/revoke') return mock.revoked++, json(res, 200, {})
-        // 구글 캘린더
-        if (p.startsWith('/calendar/v3')) {
-          if (req.headers.authorization !== 'Bearer at') return json(res, 401, { error: { message: 'unauthorized' } })
-          if (p.endsWith('/calendarList')) return json(res, 200, { items: CALS })
-          const m = p.match(/\/calendars\/([^/]+)\/events$/)
-          if (m && req.method === 'POST') {
-            const ev = JSON.parse(body)
-            mock.created.push({ calendar: decodeURIComponent(m[1]), ...ev })
-            return json(res, 200, { id: `new${mock.created.length}`, ...ev })
-          }
-          if (m) {
-            const cal = decodeURIComponent(m[1])
-            const items =
-              cal === 'me@x'
-                ? [
-                    { id: 'g1', summary: '구글 팀 미팅', start: { dateTime: at(today, '10:00') }, end: { dateTime: at(today, '11:00') }, htmlLink: 'https://calendar.google.com/e/g1' },
-                    { id: 'g2', summary: '구글 종일', start: { date: tomorrow }, end: { date: A.addDays(tomorrow, 1) } },
-                    ...mock.created.map((c, i) => ({ id: `new${i + 1}`, summary: c.summary, start: c.start, end: c.end })),
-                  ]
-                : cal === 'work'
-                  ? [{ id: 'w1', summary: '회사 점심', start: { dateTime: at(today, '12:00') }, end: { dateTime: at(today, '13:00') } }]
-                  : [{ id: 'h1', summary: '숨김 일정', start: { date: today }, end: { date: tomorrow } }]
-            return json(res, 200, { items })
-          }
-          return json(res, 404, { error: { message: 'not found' } })
-        }
-        // Gemini
-        if (req.headers['x-goog-api-key'] !== 'test-key') return res.writeHead(400), res.end('{"error":"bad key"}')
-        const prompt = JSON.parse(body).contents[0].parts[0].text
-        json(res, 200, { candidates: [{ content: { parts: [{ text: JSON.stringify(geminiReply(prompt)) }] } }] })
-      })
+        if (m[1] === PAGE_ID) return json(res, 200, { results: PAGE, has_more: false })
+        if (m[1] === BOARD_ID) return json(res, 200, { results: BOARD, has_more: false })
+        return json(res, 404, { message: 'Could not find block' })
+      }
+      json(res, 404, {})
     })
     server.listen(PORT, '127.0.0.1', () => resolve(server))
   })
 }
 
-exports.run = async ({ app, store, getWidget, openManager, getManager, setWidgetMode, toggleQuick, getQuick }) => {
+exports.run = async ({ app, store, getWidget, openSettings, getSettings, setWidgetMode }) => {
+  const { safeStorage } = require('electron')
   const results = []
   const check = (name, ok, info = '') => results.push({ name, ok: !!ok, info })
   const server = await startServer()
-  const base = `http://127.0.0.1:${PORT}`
+  const cap = async (w, name) => {
+    if (!SHOT_DIR) return
+    await wait(500)
+    fs.writeFileSync(path.join(SHOT_DIR, name), (await w.webContents.capturePage()).toPNG())
+  }
+  const wjs = (code) => getWidget().webContents.executeJavaScript(code)
 
   try {
-    await wait(1200)
-    openManager('today')
     await wait(1500)
-    const m = getManager()
+    // ── 1) 처음: 토큰 없음 → 위젯은 연결 안내 ──
+    let s = await wjs('nf.snapshot()')
+    check('처음엔 보드 없음 · 토큰 없음', !s.hasToken && !s.board)
+    check('위젯: Notion 연결 안내', /Notion 연결하기/.test(await wjs('document.body.innerText')))
+    await cap(getWidget(), 'widget-setup.png')
+
+    openSettings()
+    await wait(1500)
+    const m = getSettings()
     const js = (code) => m.webContents.executeJavaScript(code)
-    const snap = () => js('nf.snapshot()')
-    const cap = async (w, name) => {
-      if (!SHOT_DIR) return
-      await wait(500)
-      fs.writeFileSync(path.join(SHOT_DIR, name), (await w.webContents.capturePage()).toPNG())
-    }
 
-    // ── 1) 잠금 ──
-    let s = await snap()
-    check('처음엔 잠겨 있음 (개인 데이터 미전송)', s.locked === true && s.events === undefined && s.settings.google.allowedEmails.includes(OWNER))
-    const blocked = await js("nf.saveEvent({ title: 'x', date: '2026-01-01' }).then(() => 'ok', (e) => e.message)")
-    check('잠금 중 쓰기 거부', /로그인이 필요/.test(blocked), blocked)
-    check('잠금 화면 렌더링 (구글 로그인 + 간편 모드)', /Google 계정으로 로그인/.test(await js('document.body.innerText')) && /간편 모드로 시작/.test(await js('document.body.innerText')))
-    check('설치 파일에 구운 구글 클라이언트 자동 적용', s.settings.google.clientId === 'cid' && s.settings.google.hasSecret)
-    await cap(m, 'lock-setup.png')
+    // ── 2) 토큰 형식 검사 → 저장 → 보드 읽기 ──
+    let r = await js("nf.setToken('abc')")
+    check('잘못된 형식의 토큰 거부', r.ok === false && /ntn_/.test(r.message), r.message)
+    r = await js(`nf.setToken(${JSON.stringify(TOKEN)})`)
+    s = await js('nf.snapshot()')
+    check('토큰 저장 → 7일 보드 읽기', r.ok && r.days === 7 && s.hasToken && s.board.days.length === 7 && s.board.range === `${md(-1)} – ${md(5)}`, JSON.stringify(r))
+    check('토큰은 화면으로 안 넘어감', !JSON.stringify(s).includes(TOKEN))
+    const d0 = s.board.days.find((d) => d.date === today)
+    check('파싱: 시각 · [마감] 태그 · 제목', d0 && d0.items.length === 3 && d0.items[0].time === '11:00' && d0.items[0].tag === '마감' && d0.items[0].title === '모두의창업 웹사이트 1차 제작', JSON.stringify(d0))
 
-    // ── 2) 로그인 ──
-    await js("nf.authConfig({ clientId: 'cid', clientSecret: 'sec' })")
-    s = await snap()
-    check('클라이언트 설정 저장 (시크릿은 화면에 안 보냄)', s.settings.google.clientId === 'cid' && s.settings.google.hasSecret && !JSON.stringify(s).includes('"sec"'))
-    await cap(m, 'lock.png')
-
-    mock.userEmail = 'intruder@example.com'
-    let r = await js('nf.signIn()')
-    s = await snap()
-    check('다른 구글 계정 거부 + 토큰 폐기', r.ok === false && /허용되지 않은/.test(r.message) && mock.revoked === 1 && s.locked, r.message)
-
-    mock.userEmail = OWNER
-    r = await js('nf.signIn()')
-    await wait(800)
-    s = await snap()
-    check('본인 계정 로그인 → 잠금 해제', r.ok && !s.locked && s.account.email === OWNER, r.message || r.email)
+    // ── 3) 위젯 시각화 ──
     await wait(600)
-    const saved = (store.flush(), store._read()) /* 암호화돼 있어도 앱과 같은 방식으로 복호화 */
-    const { safeStorage } = require('electron')
-    const encOk = safeStorage.isEncryptionAvailable()
-    check(
-      encOk ? '리프레시 토큰은 OS 키체인으로 암호화 저장' : '리프레시 토큰 저장 (이 OS 는 키체인 없음 → 평문 표시)',
-      encOk ? saved.account.refreshEnc.startsWith('enc:') && !JSON.stringify(saved).includes('"rt"') : saved.account.refreshEnc === 'raw:rt',
-      saved.account.refreshEnc.slice(0, 8)
+    const wv = JSON.parse(
+      await wjs(
+        "JSON.stringify({ days: document.querySelectorAll('.day').length, today: document.querySelector('.day.today .rel')?.textContent || '', due: document.querySelectorAll('.it.due').length, must: document.querySelectorAll('.it.must').length, allday: [...document.querySelectorAll('.it .tm')].filter((e) => e.textContent === '종일').length, past: document.body.innerText.includes('어제 지난 일'), stale: /갱신 전/.test(document.querySelector('.ft')?.innerText || ''), h: document.getElementById('wrap').getBoundingClientRect().height })"
+      )
     )
-    check('자동 일정 시드 없음', s.activities.length === 0 && s.events.length === 0, `활동 ${s.activities.length} · 일정 ${s.events.length}`)
+    check('위젯: 오늘부터 6일 · 오늘 표시 · 마감/필수 강조 · 종일', wv.days === 6 && wv.today === '오늘' && wv.due === 3 && wv.must === 1 && wv.allday === 3, JSON.stringify(wv))
+    check('위젯: 아침 갱신 전이면 지난 날은 숨기고 알림', !wv.past && wv.stale, JSON.stringify(wv))
+    const wb = getWidget().getBounds()
+    check('위젯 창 높이가 내용에 맞춰짐 (잘리지 않음)', wb.height >= Math.min(wv.h, 600) - 2, `${wb.height} / ${wv.h}`)
+    await cap(getWidget(), 'widget.png')
 
-    // ── 3) 구글 캘린더 ──
-    for (let i = 0; i < 25 && !(await snap()).remote.calendars; i++) await wait(200)
-    s = await snap()
-    const g = (s.remote.events || []).filter((e) => e.source === 'google')
-    check(
-      '구글 캘린더 동기화 (표시 켠 캘린더만)',
-      g.some((e) => e.title === '구글 팀 미팅' && e.start === '10:00' && e.color === '#3182f6') &&
-        g.some((e) => e.title === '회사 점심' && e.calendar === '회사') &&
-        g.some((e) => e.title === '구글 종일' && e.date === tomorrow && !e.start) &&
-        !g.some((e) => e.title === '숨김 일정'),
-      g.map((e) => `${e.calendar}:${e.title}@${e.date} ${e.start || '종일'}`).join(', ')
-    )
-    await js(`nf.saveSettings({ google: { calendarIds: ['me@x'] } })`)
-    await wait(1200)
-    s = await snap()
-    check('표시할 캘린더 선택 반영', !s.remote.events.some((e) => e.title === '회사 점심') && s.remote.events.some((e) => e.title === '구글 팀 미팅'))
-    check('토큰 재사용 (매번 새로 받지 않음)', mock.tokenCalls === 2, `token calls ${mock.tokenCalls}`)
-
-    // ── 4) 빠른 입력: 규칙 → 구글 캘린더에 생성 ──
-    await js("nf.saveSettings({ engine: 'gemini' })") // 키 없음 → 규칙
-    let item = await js("nf.previewInput('내일 오후 3시 커피챗 강남 2시간')")
-    check('입력 해석(규칙)', item.kind === 'event' && item.date === tomorrow && item.start === '15:00' && item.minutes === 120 && item.source === 'rules', JSON.stringify(item))
-    r = await js(`nf.commitInput(${JSON.stringify(item)})`)
-    const made = mock.created[0]
-    check(
-      '구글 캘린더에 일정 생성',
-      r.ok && /구글/.test(r.message) && made?.start?.dateTime === `${tomorrow}T15:00:00` && made?.end?.dateTime === `${tomorrow}T17:00:00` && made.calendar === 'primary',
-      JSON.stringify(made)
-    )
-    r = await js("nf.previewInput('!자소서 1문항 끝내기').then((i) => nf.commitInput(i))")
-    s = await snap()
-    check('입력 → 오늘의 단 하나', s.brief?.one_thing === '자소서 1문항 끝내기' && s.brief.source === 'manual')
-    await js("nf.previewInput('메모: 위젯 다크모드 아이디어').then((i) => nf.commitInput(i))")
-    await js("nf.previewInput('포트폴리오 케이스 정리').then((i) => nf.commitInput(i))")
-    s = await snap()
-    check('입력 → 메모 / 활동 보드', s.notes.some((n) => n.text === '위젯 다크모드 아이디어') && s.activities.some((a) => a.name === '포트폴리오 케이스 정리' && a.status === '승인됨'))
-
-    // ── 5) 엔진: Gemini ──
-    r = await js("nf.setKey('wrong-key')")
-    check('잘못된 Gemini 키 → ok:false', r.ok === false, r.message?.slice(0, 40))
-    r = await js("nf.setKey('test-key')")
-    s = await snap()
-    check('Gemini 키 저장 + 스냅샷에 키 원문 없음', r.ok && s.settings.hasKey && s.settings.provider === 'gemini' && !JSON.stringify(s).includes('test-key'))
-    item = await js("nf.previewInput('내일 3시 커피챗')")
-    check('입력 해석(Gemini)', item.source === 'gemini' && item.title === '커피챗' && item.start === '15:00', JSON.stringify(item))
-    const before = (await snap()).activities.length
-    for (const job of ['brief', 'weekly', 'english', 'news']) await js(`nf.run('${job}')`)
-    s = await snap()
-    check('자동 추천·뉴스·영어 생성 경로 제거', s.activities.length === before && !s.english && !s.news.items.length && !s.coachTips.length)
-    const engine = await js('nf.detectEngine()')
-    check('ChatGPT 구독 로그인 감지', engine.codexStatus?.subscription === true)
-    await js("nf.saveSettings({ engine: 'codex' })")
-    item = await js("nf.previewInput('내일 오후 3시 커피챗')")
-    check('Codex 구독으로 입력 해석 + 입력 조언', item.source === 'codex' && item.title === 'CODEX: 커피챗' && !!item.coaching)
-    const eventCount = (await snap()).events.length
-    r = await js("nf.reviewSchedule('일정을 잘 쓰려면?')")
-    check('LLM 일정 코칭은 일정 추가 없이 조언만', r.ok && r.source === 'codex' && r.answer.startsWith('CODEX:') && (await snap()).events.length === eventCount)
-
-    // ── 과목 자료 폴더 연계 (exam-study 구조) ──
-    const studyDir = path.join(process.env.NF_DATA_DIR, 'study-fixture')
-    fs.mkdirSync(path.join(studyDir, '과목', '교통정책론'), { recursive: true })
-    const exam = A.addDays(today, 11)
-    fs.writeFileSync(path.join(studyDir, '과목', '교통정책론', 'README.md'), '# 교통정책론\n중간 35%\n')
-    fs.writeFileSync(path.join(studyDir, '과목', '교통정책론', '시험전략.md'), `# 시험 전략\n| 항목 | 내용 |\n|---|---|\n| 날짜 | ${exam.slice(5, 7)}/${exam.slice(8, 10)}(수) 12:00–13:15 |\n우선순위 1: GC 계산\n`)
-    fs.mkdirSync(path.join(studyDir, '과목', '교통정책론', '주차'), { recursive: true })
-    fs.writeFileSync(path.join(studyDir, '과목', '교통정책론', '주차', '02주차_GC.md'), '# 2주차 일반화 통행비용\nGC 계산 = 시간 × VOT + 비용\n')
-    await js(`nf.saveSettings({ study: { folder: ${JSON.stringify(studyDir)} } })`)
-    const sc = await js('nf.studyCourses()')
-    check('과목 자료 폴더 연결 (과목·시험일·D-day)', sc.ok && sc.courses[0]?.name === '교통정책론' && sc.courses[0].exam?.dday === 11 && !JSON.stringify(sc).includes('GC 계산'), JSON.stringify(sc).slice(0, 120))
-    r = await js("nf.reviewSchedule('시험 준비는?', '교통정책론')")
-    check('과목 선택 코칭: 과목 자료가 AI 에 전달됨', r.ok && /교통정책론 자료/.test(r.answer), r.answer)
-    const evBefore = (await snap()).events.length
-    const pl = await js("nf.planStudy({ course: '교통정책론', days: 7 })")
-    check('공부 일정 제안: 저장 전 미리보기(batch)로만 돌려줌', pl.ok && pl.item.kind === 'batch' && pl.item.plan && pl.item.items[0].title.startsWith('[교통정책론]') && (await snap()).events.length === evBefore, JSON.stringify(pl).slice(0, 140))
-    // 화면: 과목 칩 + 제안 버튼 → 입력 검토 화면
-    await js("location.hash = 'today'")
-    await wait(700)
-    const chips = await js("[...document.querySelectorAll('[data-act=course-pick]')].map((b) => b.textContent.trim()).join('|')")
-    check('오늘 화면에 과목 칩(D-day)', /교통정책론 · D-11/.test(chips), chips)
-    await js("document.querySelector('[data-act=study-plan]').click()")
-    for (let i = 0; i < 30 && !(await js("document.querySelectorAll('#ask-preview [data-review-index]').length")); i++) await wait(200)
-    const prev = await js("document.getElementById('ask-preview').innerText")
-    check('제안이 입력 검토 화면에 뜸 (아직 저장 안 됨)', /아직 저장되지 않았어요/.test(prev) && /GC 계산 3회/.test(await js("[...document.querySelectorAll('#ask-preview [data-review-field=title]')].map((i) => i.value).join('|')")), prev.slice(0, 80))
-    await cap(m, 'study-plan.png')
-    await js("document.getElementById('ask-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))")
-    await wait(200)
-    await js("nf.saveSettings({ study: { folder: '' } })")
-    await js("nf.saveSettings({ engine: 'off' })")
-
-    // ── 7) iCal 주소도 함께 ──
-    await js(`nf.saveSettings({ icsUrls: ['${base}/cal.ics'] })`)
-    for (let i = 0; i < 20 && !(await snap()).remote.events.some((e) => e.calendar === '공유'); i++) await wait(200)
-    s = await snap()
-    check('iCal + 구글 함께 표시', s.remote.events.filter((e) => e.calendar === '공유').length === 2 && s.remote.events.some((e) => e.source === 'google'))
-
-    // ── 8) 일정 · 마감 · 완료 ──
-    const dday = A.addDays(today, 3)
-    await js(`nf.saveEvent({ title: '테스트 마감', date: '${dday}', start: '09:00', deadline: true, domain: '💼 일·소명' })`)
-    s = await snap()
-    check('D-day 계산', A.deadlines({ events: s.events, activities: s.activities }, today).some((d) => d.title === '테스트 마감' && d.d === 3))
-    await js('nf.toggleOneThing()')
-    s = await snap()
-    check('단 하나 완료 + 기록', s.brief.done === true && s.history.some((h) => h.date === today && h.done))
-    await js(`nf.saveEvent({ title: '직접 쓴 반복 일정', date: '${today}', start: '07:00', repeat: 'daily' })`)
-    s = await snap()
-    const occ = A.occurrences({ events: s.events, remote: s.remote.events, activities: s.activities, doneMap: s.doneMap }, today, today)
-    const routine = occ.find((o) => o.repeat === 'daily')
-    await js(`nf.toggleOccurrence(${JSON.stringify(routine.key)})`)
-    s = await snap()
-    check('반복 일정은 날짜별로 완료', !!s.doneMap[routine.key])
-
-    await js(`nf.saveActivity({ name: '직접 쓴 지난 할 일', date: '${A.addDays(today, -1)}', status: '예정됨' })`)
-    s = await snap()
-    const stale = s.activities.filter((a) => a.date && a.date < today && !['완료', '보류'].includes(a.status)).length
-    const moved = await js('nf.archiveStale()')
-    s = await snap()
-    check('지난 활동 정리 → 보류 (삭제 안 함)', moved === stale && moved > 0 && !s.activities.some((a) => a.date && a.date < today && !['완료', '보류'].includes(a.status)), `${moved}개`)
-
-    // ── 9) 화면 ──
-    await js("location.hash = 'calendar'")
-    await wait(400)
-    // 한 날짜에 일정이 많아도 칸이 늘어나 전부 보이는지 (자르거나 '+N개' 로 접지 않음)
-    const busyDay = today
-    for (let i = 0; i < 6; i++) {
-      await js(`nf.saveEvent({ title: '${i === 0 ? '아주 긴 제목의 일정이라 한 줄에 다 안 들어가는 경우 — 2026 중간고사 대비 스터디 모임' : `겹친 일정 ${i}`}', date: '${busyDay}', start: '${String(8 + i).padStart(2, '0')}:00' })`)
-    }
-    await wait(500)
-    const fit = JSON.parse(
-      await js(`JSON.stringify((() => {
-        const cell = document.querySelector('.cell[data-date="${busyDay}"]')
-        const pills = [...cell.querySelectorAll('.pill')]
-        const cr = cell.getBoundingClientRect()
-        const long = pills.find((p) => p.textContent.includes('아주 긴 제목'))
-        return {
-          pills: pills.length,
-          more: !!cell.querySelector('.more'),
-          clipped: pills.filter((p) => p.scrollHeight > p.clientHeight + 1 || p.scrollWidth > p.clientWidth + 1).length,
-          outside: pills.filter((p) => p.getBoundingClientRect().bottom > cr.bottom + 1).length,
-          longWraps: !!long && long.getBoundingClientRect().height > 36,
-          // 읽을 수 있는 폭인지: 제목 칸이 한 글자씩 쪼개질 만큼 좁으면 안 된다
-          titleW: Math.round(Math.min(...pills.map((p) => p.querySelector('.tt').getBoundingClientRect().width))),
-          // 글꼴 폭은 OS 마다 달라 줄 수 대신 '한 줄에 몇 글자 들어가는지' 로 본다 (4자 미만이면 한 글자씩 쪼개진 것)
-          charsPerLine: long ? Math.round((long.querySelector('.tt').textContent.length / Math.round(long.querySelector('.tt').getBoundingClientRect().height / parseFloat(getComputedStyle(long).lineHeight)))* 10) / 10 : 0,
-        }
-      })())`)
-    )
-    check('캘린더 칸이 일정 수만큼 늘어남 (6개 전부 · 접힘 없음 · 잘림 없음)', fit.pills >= 6 && !fit.more && fit.clipped === 0 && fit.outside === 0, JSON.stringify(fit))
-    check('긴 제목은 읽을 수 있는 폭에서 줄바꿈 (한 글자씩 쪼개지지 않음)', fit.longWraps && fit.titleW >= 48 && fit.charsPerLine >= 4, JSON.stringify(fit))
-    await cap(m, 'app-calendar-busy.png')
-    await js("document.querySelector('[data-act=new-event]').click()")
+    // ── 4) 누르면 Notion 앱으로 ──
+    await wjs("document.querySelector('.day').click()")
     await wait(300)
-    check('새 일정 모달 (저장 위치 선택 포함)', await js("document.getElementById('modal').open && !!document.querySelector('select[name=target]')"))
-    await cap(m, 'modal.png')
-    await js("document.getElementById('modal').close()")
+    s = await js('nf.snapshot()')
+    const blk = BOARD_ID.replace(/-/g, '')
+    check('위젯 누르면 Notion 앱 주소로 (보드 위치)', s.test.opened.at(-1) === `notion://www.notion.so/${PAGE_ID}#${blk}`, s.test.opened.at(-1))
+    await js("nf.saveSettings({ notion: { openIn: 'web' } })")
+    await wjs("document.querySelector('[data-act=open].lk').click()")
+    await wait(300)
+    s = await js('nf.snapshot()')
+    check('설정: 브라우저로 열기', s.test.opened.at(-1) === `https://www.notion.so/${PAGE_ID}#${blk}`, s.test.opened.at(-1))
+    await js("nf.saveSettings({ notion: { openIn: 'app' } })")
 
-    toggleQuick()
-    // 느린 러너에서는 ready-to-show 가 늦다 → 최대 10초까지 기다린다
-    let q = null
-    for (let i = 0; i < 50; i++) {
-      q = getQuick()
-      if (q && !q.isDestroyed() && q.isVisible() && !q.webContents.isLoading()) break
-      await wait(200)
-    }
-    check('빠른 입력 창', q && q.isVisible() && (await q.webContents.executeJavaScript('!!document.getElementById("q")')))
-    await q.webContents.executeJavaScript("document.getElementById('q').value = '금요일 7시 반 스터디'; document.getElementById('bar').requestSubmit()")
-    await wait(1500)
-    await cap(q, 'quick.png')
-    q.hide()
+    // ── 5) 오류: 연결 안 된 페이지 → 보드는 그대로 두고 경고 ──
+    r = await js(`nf.saveSettings({ notion: { page: 'https://www.notion.so/Other-${OTHER_PAGE}' } })`)
+    await wait(800)
+    s = await js('nf.snapshot()')
+    check('연결 안 된 페이지 → 이유 안내 · 마지막 보드는 유지', /연결/.test(s.boardError) && s.board?.days.length === 7, s.boardError)
+    check('위젯에 경고 표시', /⚠/.test(await wjs("document.querySelector('.ft')?.innerText || ''")))
+    await js("nf.saveSettings({ notion: { page: '' } })")
+    await wait(800)
+    s = await js('nf.snapshot()')
+    check('기본 페이지로 되돌리면 다시 정상', !s.boardError && s.board.pageId === PAGE_ID, s.boardError)
+    const settingsText = await js('document.body.innerText')
+    check('설정 창: 연결 상태 표시', /연결됨/.test(settingsText) && /7일/.test(settingsText), settingsText.slice(0, 80))
+    await cap(m, 'settings.png')
 
-    // ── 10) 위젯 · Win+D ──
+    // ── 6) 위젯 옮기기 · 고정 · Win+D ──
     setWidgetMode('edit')
     await wait(1200)
-    check('편집 모드 전환', (await snap()).widgetMode === 'edit')
+    check('옮기기 모드', (await js('nf.snapshot()')).widgetMode === 'edit' && /드래그/.test(await wjs('document.body.innerText')))
     await cap(getWidget(), 'widget-edit.png')
     setWidgetMode('pinned')
     await wait(1500)
     if (process.platform === 'win32') {
-      s = await snap()
+      s = await js('nf.snapshot()')
       check('Win+D 보호 켜짐 (소유자 = 바탕화면)', s.winDesktop?.active && s.winDesktop.ownerIsDesktop, JSON.stringify(s.winDesktop))
       const ps = (cmd) => execFileSync('powershell', ['-NoProfile', '-Command', cmd], { stdio: 'ignore' })
-      m.show()
-      await wait(500)
       ps('(New-Object -ComObject Shell.Application).ToggleDesktop()') // = Win+D
       await wait(2000)
-      s = await snap()
-      // 대조군: 일반 창(관리 창)이 내려갔는지로 '바탕화면 보기'가 실제로 일어났는지 판단
-      const control = m.isMinimized() || !m.isVisible()
-      check(
-        'Win+D 뒤에도 위젯 표시',
-        s.winDesktop.visible && !s.winDesktop.iconic && getWidget().isVisible(),
-        `${JSON.stringify(s.winDesktop)} · 대조군(관리 창) ${control ? '내려감 → 바탕화면 보기 실제 발생' : '그대로 → 이 러너에선 바탕화면 보기가 안 일어남(판단 보류)'}`
-      )
-      await cap(getWidget(), 'widget-after-win-d.png')
+      s = await js('nf.snapshot()')
+      check('Win+D 뒤에도 위젯 표시', s.winDesktop.visible && !s.winDesktop.iconic && getWidget().isVisible(), JSON.stringify(s.winDesktop))
       ps('(New-Object -ComObject Shell.Application).ToggleDesktop()')
     }
-    await cap(getWidget(), 'widget.png')
-    for (const v of ['today', 'calendar', 'settings']) {
-      await js(`location.hash = '${v}'`)
-      await cap(m, `app-${v}.png`)
-    }
-    await js("nf.saveSettings({ widget: { theme: 'dark' } })")
+    await js("nf.saveSettings({ widget: { theme: 'light' } })")
     await wait(800)
-    await cap(getWidget(), 'widget-dark.png')
-    await js("location.hash = 'today'")
-    await cap(m, 'app-today-dark.png')
+    await cap(getWidget(), 'widget-light.png')
+    await js("nf.saveSettings({ widget: { theme: 'auto' } })")
 
-    // ── 보안: PIN · 세션 잠금 · 가리기 · 암호화 ──
-    r = await js("nf.setPin('12')")
-    check('PIN 형식 검사', r.ok === false)
-    r = await js("nf.setPin('2580')")
-    s = await snap()
-    check('PIN 설정 (해시는 화면에 안 보냄)', r.ok && s.settings.security.hasPin && !JSON.stringify(s).includes('scrypt'))
-    await js('nf.lockNow()')
-    s = await snap()
-    const lockedWrite = await js("nf.saveEvent({ title: 'x', date: '2026-01-01' }).then(() => 'ok', (e) => e.message)")
-    const draftOff = await js("nf.setInputActive(false).then(() => 'ok', (e) => e.message)")
-    check('잠금 중에도 입력 종료 알림 수신 (업데이트가 막히지 않게)', draftOff === 'ok', draftOff)
-    check('지금 잠그기 → 개인 데이터 숨김 + 쓰기 거부', s.locked && s.sessionLocked && !s.needsLogin && s.events === undefined && /로그인이 필요/.test(lockedWrite))
-    check('PIN 잠금 화면', /PIN 을 입력하세요/.test(await js('document.body.innerText')))
-    await cap(m, 'pin-lock.png')
-    r = await js("nf.unlock('0000')")
-    check('틀린 PIN 거부', r.ok === false)
-    r = await js("nf.unlock('2580')")
-    s = await snap()
-    check('PIN 해제', r.ok && !s.locked)
-    await js('nf.togglePrivacy()')
-    await wait(400)
-    check('가리기 모드 (위젯)', (await snap()).privacy && (await getWidget().webContents.executeJavaScript("document.body.classList.contains('privacy')")))
-    await cap(getWidget(), 'widget-privacy.png')
-    await js('nf.togglePrivacy()')
-    await js("nf.setPin('')")
-    await wait(500)
-    const rawFile = fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8')
+    // ── 7) 틀린 토큰 → 이유 안내 ──
+    r = await js(`nf.setToken('ntn_${'z'.repeat(40)}')`)
+    check('틀린 토큰 → 다시 넣으라는 안내', r.ok === false && /토큰이 맞지 않/.test(r.message) && mock.badAuth >= 1, r.message)
+    r = await js(`nf.setToken(${JSON.stringify(TOKEN)})`)
+    check('다시 맞는 토큰', r.ok)
+
+    // ── 8) 저장 파일: 토큰·보드가 평문으로 남지 않음 ──
+    store.flush()
+    const raw = fs.readFileSync(path.join(process.env.NF_DATA_DIR, 'neural-flow.json'), 'utf-8')
     check(
-      safeStorage.isEncryptionAvailable() ? '데이터 파일 암호화 (평문 없음)' : '데이터 파일 (이 OS 는 키체인 없음 → 평문)',
-      safeStorage.isEncryptionAvailable() ? rawFile.startsWith('NFENC1') && !rawFile.includes('테스트 마감') : rawFile.includes('테스트 마감'),
-      rawFile.slice(0, 6)
+      safeStorage.isEncryptionAvailable() ? '데이터 파일 암호화 (토큰·보드 평문 없음)' : '데이터 파일 (이 OS 는 키체인 없음 → 평문)',
+      safeStorage.isEncryptionAvailable() ? raw.startsWith('NFENC1') && !raw.includes(TOKEN) && !raw.includes('모두의창업') : raw.includes('모두의창업'),
+      raw.slice(0, 6)
     )
 
-    const qw = getQuick()
-    if (qw && !qw.isDestroyed()) {
-      qw.show()
-      await qw.webContents.executeJavaScript("document.getElementById('q').value = '남은 글자'; document.getElementById('q').dispatchEvent(new Event('input')); 1")
-      await wait(200)
-      qw.hide()
-      await wait(200)
-    }
-    // ── 업데이트: 확인 → 받기 → SHA-256 검증 (설치는 건너뜀) ──
+    // ── 9) 업데이트: 확인 → 받기 → SHA-256 검증 (설치는 건너뜀) ──
     const u = await js('nf.checkUpdate()')
     if (process.platform === 'linux') {
-      // 리눅스용 설치 파일은 배포하지 않는다 → 새 버전은 보이지만 설치 대상은 없음
       check('업데이트 확인 (리눅스: 설치 파일 없음)', u.version === '9.9.9' && !u.available && !u.asset)
-      r = await js('nf.installUpdate()')
-      check('숨긴 빠른 입력·잠금 후에도 업데이트가 입력 중으로 막히지 않음', !/입력/.test(r.message || ''), r.message)
     } else {
       check('업데이트 확인', u.available && u.version === '9.9.9' && !!u.asset, `${u.current} → ${u.version}`)
       r = await js('nf.installUpdate()')
       check('업데이트 받기 + SHA-256 검증', r.ok && r.dryRun && r.verified, JSON.stringify(r).slice(0, 80))
     }
-    // ── 업데이트 팝업·배너·위젯 알림 (화면만 검사: 가짜 새 버전 상태를 주입) ──
-    await js("location.hash = 'today'")
-    await wait(300)
-    await js(`(async () => {
-      S.update = { available: true, version: '9.9.9', current: S.version, notes: '테스트 노트', asset: { size: 83886080 } }
-      S.settings.updates.skipVersion = ''
-      document.getElementById('ask-input').value = ''
-      updateLater = ''
-      renderUpdate()
-    })()`)
-    await wait(200)
-    const pop1 = await js("JSON.stringify({ open: document.getElementById('update-dialog').open, text: document.getElementById('update-dialog').innerText })")
-    const p1 = JSON.parse(pop1)
-    check('새 버전 팝업이 뜸 (버전·용량·노트·지금 업데이트)', p1.open && /9\.9\.9/.test(p1.text) && /80MB/.test(p1.text) && /테스트 노트/.test(p1.text) && /지금 업데이트/.test(p1.text), p1.text.replace(/\s+/g, ' ').slice(0, 80))
-    await cap(m, 'update-popup.png')
-    await js("document.querySelector('#update-dialog [data-act=update-later]').click()")
-    await wait(200)
-    const after = JSON.parse(await js("JSON.stringify({ open: document.getElementById('update-dialog').open, banner: !document.getElementById('update-banner').hidden && document.getElementById('update-banner').innerText })"))
-    check('나중에 → 팝업 닫히고 상단 배너 유지', !after.open && /9\.9\.9/.test(after.banner || ''), after.banner)
-    await js("document.querySelector('#update-banner [data-act=update-open]').click()")
-    await wait(200)
-    await js("S.update = { ...S.update, downloading: 40 }; renderUpdate()")
-    await wait(100)
-    const dl = JSON.parse(await js("JSON.stringify({ w: document.querySelector('#update-dialog .update-progress i')?.style.width, disabled: document.querySelector('#update-dialog [data-act=update-install]').disabled, later: !!document.querySelector('#update-dialog [data-act=update-later]') })"))
-    check('받는 중: 진행률 표시 · 버튼 잠김 · 닫기 버튼 숨김', dl.w === '40%' && dl.disabled && !dl.later, JSON.stringify(dl))
-    const cancelled = await js("(() => { const e = new Event('cancel', { cancelable: true }); document.getElementById('update-dialog').dispatchEvent(e); return e.defaultPrevented })()")
-    check('받는 중에는 Esc 로 닫히지 않음', cancelled === true)
-    await js("S.update = null; renderUpdate(); document.getElementById('update-dialog').open && document.getElementById('update-dialog').close()")
-    // 위젯: 새 버전 알림 칩
-    const w = getWidget()
-    await w.webContents.executeJavaScript("S.update = { available: true, version: '9.9.9' }; render(); 1")
-    const pill = await w.webContents.executeJavaScript("document.querySelector('.update-pill')?.innerText || ''")
-    check('위젯에 새 버전 알림 칩', /9\.9\.9/.test(pill), pill)
-    await w.webContents.executeJavaScript("S.update = null; render(); 1")
-    await js('refresh()')
-    await w.webContents.executeJavaScript('refresh()')
-    await js("location.hash = 'settings'")
-    await cap(m, 'app-settings-security.png')
 
-    // ── 12) 메모장 → Claude 정리 → 수락/버림 → 쪼개기 → 개념 트리 ──
-    await js("nf.saveSettings({ engine: 'auto' })")
-    await js('nf.detectEngine()')
-    // 나에 대한 기억 (exam-study 메모리/ 흉내)
-    fs.mkdirSync(path.join(studyDir, '메모리'), { recursive: true })
-    fs.writeFileSync(path.join(studyDir, '메모리', '프로필.md'), '# 프로필\n## 진로\n- 목표: AI PM / PO\n- 도메인: PropTech · Mobility\n')
-    fs.writeFileSync(path.join(studyDir, '메모리', '작업방식.md'), '# 작업 방식\n- 질문은 1개만\n')
-    await js(`nf.saveSettings({ study: { folder: ${JSON.stringify(studyDir)} } })`)
-    await js(`nf.saveMemo(${JSON.stringify('내일 3시 팀플 회의\n교통 GC 계산 다시 보기\n그냥 생각: 날씨 좋다')})`)
-    await wait(300)
-    const wv = await w.webContents.executeJavaScript("document.getElementById('memo').value")
-    check('위젯 메모장에 같은 메모가 보임', /팀플 회의/.test(wv) && !(await w.webContents.executeJavaScript("document.getElementById('memo-wrap').hidden")), wv.slice(0, 30))
-    const focusOn = await w.webContents.executeJavaScript('nf.widgetFocus(true)')
-    const focusable = w.isFocusable()
-    await w.webContents.executeJavaScript('nf.widgetFocus(false)')
-    check('위젯 메모: 누를 때만 키보드 입력 받음', focusOn === true && (process.platform !== 'win32' || (focusable === true && w.isFocusable() === false)), `${focusable} → ${w.isFocusable()}`)
-    const evCount0 = (await snap()).events.length
-    let org = await js('nf.organizeMemo()')
-    s = await snap()
-    check('정리: 후보만 만들고 저장은 안 함 (지어낸 후보는 버림)', org.ok && org.count === 3 && s.memoCandidates.length === 3 && !s.memoCandidates.some((c) => /지어낸/.test(c.title)) && s.events.length === evCount0, JSON.stringify(org))
-    check('정리: 시간 있으면 일정, 없으면 할 일 · 확인 질문', s.memoCandidates[0].kind === 'event' && s.memoCandidates[1].kind === 'task' && s.memoQuestions[0] === '팀플 장소는 어디예요?')
-    check('기억 반영: 후보마다 비전·커리어 적합도·접근·얻을 것·다음 행동', s.memoCandidates.every((c) => c.vision === 'AI PM' && c.fit === '높음' && c.approach && c.gain && c.next === '공식 한 번 쓰기'), JSON.stringify(s.memoCandidates[0]).slice(0, 160))
-    const [c1, c2, c3] = s.memoCandidates
-    r = await js(`nf.decideCandidate(${JSON.stringify(c1.id)}, 'accept', {})`)
-    const r2 = await js(`nf.decideCandidate(${JSON.stringify(c2.id)}, 'accept', { title: 'GC 계산 다시 보기 (수정)' })`)
-    const r3 = await js(`nf.decideCandidate(${JSON.stringify(c3.id)}, 'drop')`)
-    s = await snap()
-    check('수락: 일정은 캘린더로, 할 일은 앱으로 · 버림은 저장 안 함', r.ok && r2.ok && r3.ok && s.activities.some((a) => a.name === '[교통정책론] GC 계산 다시 보기 (수정)') && s.plans.length >= 2 && !s.memoCandidates.length, `${r.message} / ${r2.message}`)
-    check('메모 줄에 ✓(수락)·✗(버림) 표시', /^✓ 내일 3시 팀플 회의$/m.test(s.memo.text) && /^✓ 교통 GC 계산 다시 보기$/m.test(s.memo.text) && /^✗ 그냥 생각: 날씨 좋다$/m.test(s.memo.text), s.memo.text)
-    org = await js('nf.organizeMemo()')
-    check('처리한 줄만 남으면 AI 를 부르지 않음', org.ok === false && /새 메모가 없어요/.test(org.message), org.message)
-    const bd = await js('nf.breakdownPlans()')
-    s = await snap()
-    const mp = s.plans.find((p) => p.tree)
-    check('쪼개기: 개념 → 5~25분 조각 트리 (모르는 id 무시)', bd.ok && bd.count === 2 && mp.tree.concepts.length === 2 && mp.tree.concepts[0].steps.map((x) => x.minutes).join() === '10,25' && mp.tree.concepts[1].steps[0].minutes === 5 && mp.progress.total === 3, JSON.stringify(bd))
-    const gcPlan = s.plans.find((p) => p.course === '교통정책론' && p.tree)
-    const otherPlan = s.plans.find((p) => p.course !== '교통정책론' && p.tree)
-    check('쪼개기: 관련 주차 노트가 근거(src)로 붙음 (다른 일엔 안 붙음)', gcPlan?.tree.concepts[0].steps[0].src === '주차/02주차_GC.md' && otherPlan && !otherPlan.tree.concepts[0].steps[0].src, JSON.stringify([gcPlan?.tree.concepts[0].steps[0], otherPlan?.tree.concepts[0].steps[0]]))
-    await js(`nf.togglePlanStep(${JSON.stringify(mp.id)}, 0, 0)`)
-    s = await snap()
-    check('조각 체크 → 진행률', s.plans.find((p) => p.id === mp.id).progress.done === 1)
-    await js("location.hash = 'memo'")
-    await wait(600)
-    const tv = JSON.parse(await js("JSON.stringify({ trees: document.querySelectorAll('.tree').length, steps: document.querySelectorAll('.t-step').length, done: document.querySelectorAll('.t-step.done').length, memo: document.getElementById('memo-text')?.value || '' })"))
-    check('관리 창: 조각에 근거 노트 표시', await js("[...document.querySelectorAll('.t-src')].some((e) => e.textContent.includes('02주차_GC'))"))
-    check('관리 창: 개념 트리 시각화 (체크 표시)', tv.trees >= 2 && tv.steps >= 6 && tv.done >= 1 && /✓ 내일 3시/.test(tv.memo), JSON.stringify({ ...tv, memo: tv.memo.slice(0, 10) }))
-    await cap(m, 'memo-tree.png')
-    await js("document.querySelector('.tree')?.scrollIntoView(); 1")
-    await wait(200)
-    await cap(m, 'memo-tree-open.png')
-    await w.webContents.executeJavaScript('refresh()')
-    await wait(300)
-    const wp = await w.webContents.executeJavaScript("document.querySelectorAll('.plans .step').length")
-    await w.webContents.executeJavaScript("document.querySelector('.plans .step').click()")
-    await wait(300)
-    s = await snap()
-    check('위젯: 쪼갠 할 일 카드에서 바로 체크', wp >= 1 && s.plans.reduce((n, p) => n + p.progress.done, 0) === 2, `${wp}개`)
-    await cap(w, 'widget-memo.png')
-    // 행동 기록 → 배운 점 제안 → [기억] → 메모리/학습노트.md → 다음 정리에 반영
-    const memInfo0 = await js('nf.getMemory()')
-    check('기억 화면 정보: 비전·통계', memInfo0.ok && /AI PM/.test(memInfo0.vision) && /버린 후보 1개/.test(memInfo0.stats), memInfo0.stats.split('\n')[0])
-    const rf = await js('nf.reflectMemory()')
-    s = await snap()
-    check('배운 점: 제안만 하고 저장은 안 함', rf.ok && s.learnProposals.length === 2 && !fs.existsSync(path.join(studyDir, '메모리', '학습노트.md')), JSON.stringify(rf))
-    const keep = await js(`nf.decideLearned(${JSON.stringify(s.learnProposals[0].id)}, true, '과목 조각은 15분 이하로 쪼갠다')`)
-    const drop = await js(`nf.decideLearned(${JSON.stringify(s.learnProposals[1].id)}, false)`)
-    const noteFile = fs.readFileSync(path.join(studyDir, '메모리', '학습노트.md'), 'utf8')
-    check('[기억]한 것만 메모리/학습노트.md 에 (다른 메모리 파일은 그대로)', keep.ok && drop.ok && /15분 이하로 쪼갠다/.test(noteFile) && !/버린 메모 유형/.test(noteFile) && fs.readFileSync(path.join(studyDir, '메모리', '프로필.md'), 'utf8').startsWith('# 프로필'), noteFile.split('\n').slice(-2).join(' '))
-    await js(`nf.saveMemo(${JSON.stringify('토요일 GC 예제 풀기')})`)
-    await js('nf.organizeMemo()')
-    s = await snap()
-    check('다음 정리에 배운 점이 반영됨', s.memoCandidates[0]?.approach === '배운 점대로 15분 조각', s.memoCandidates[0]?.approach)
-    await js("location.hash = 'memo'")
-    await wait(700)
-    const mv = JSON.parse(await js("JSON.stringify({ chain: document.querySelector('.cand .chain')?.innerText || '', fit: document.querySelector('.cand .fit')?.innerText || '', learned: [...document.querySelectorAll('.learned li')].map((l) => l.innerText).join('|') })"))
-    check('화면: 비전 → 할 일 → 다음 행동 연결 · 적합도 · 배운 점 목록', /🎯 AI PM/.test(mv.chain) && /▶ 공식 한 번 쓰기/.test(mv.chain) && /높음/.test(mv.fit) && /15분 이하로/.test(mv.learned), JSON.stringify(mv))
-    await cap(m, 'memo-memory.png')
-    await js("document.querySelector('.stack:last-child .card')?.scrollIntoView(); 1")
-    await cap(m, 'memo-memory-card.png')
-    // ── 학기 로드맵 역산: 제안 → 단계 빼기 → 승인 → 체크 → 이번 주 배치 → 다시 배분 ──
-    const goal = A.addDays(today, 40)
-    let rp = await js(`nf.proposeRoadmap({ course: '교통정책론', label: '기말고사', date: '${goal}', hoursPerWeek: 4 })`)
-    s = await snap()
-    const dr = s.roadmapDraft
-    check('로드맵 제안: 기간을 오늘~목표일로 자르고 형식 오류 단계는 제외 (저장 전)', rp.ok && dr.stages.length === 3 && dr.stages[0].start === today && dr.stages[2].end === goal && dr.warnings.some((x) => /형식 오류/.test(x)) && !s.roadmaps.length, JSON.stringify(rp))
-    check('로드맵: 주차 노트가 조각 근거로', dr.stages[0].concepts[0].steps[0].src === '주차/02주차_GC.md' && dr.stages[0].concepts[0].steps[1].minutes === 25, JSON.stringify(dr.stages[0].concepts[0].steps))
-    await js(`nf.dropDraftStage(${JSON.stringify(dr.stages[1].id)})`)
-    r = await js('nf.decideRoadmap(true)')
-    s = await snap()
-    const rm1 = s.roadmaps[0]
-    check('로드맵 승인: 뺀 단계 없이 저장 · 제안 비움', r.ok && s.roadmaps.length === 1 && rm1.stages.length === 2 && !s.roadmapDraft && rm1.stages[0].info.current, JSON.stringify(rm1?.stages.map((x) => x.title)))
-    await js(`nf.toggleRoadmapStep(${JSON.stringify(rm1.id)}, ${JSON.stringify(rm1.stages[0].id)}, 0, 0)`)
-    s = await snap()
-    check('로드맵 조각 체크 → 진행률 · 주간 부하', s.roadmaps[0].progress.done === 1 && s.roadmaps[0].progress.total === 3 && s.roadmapLoad[0].byCourse['교통정책론'] > 0, JSON.stringify(s.roadmaps[0].progress))
-    const evRm = s.events.length
-    const wk = await js(`nf.placeRoadmapWeek(${JSON.stringify(rm1.id)})`)
-    check('이번 주 배치: 남은 조각을 미리보기(batch)로만 (캘린더는 그대로)', wk.ok && wk.item.kind === 'batch' && wk.item.items[0].title === '[교통정책론] 숫자 바꿔 예제' && (await snap()).events.length === evRm, JSON.stringify(wk).slice(0, 160))
-    await js("location.hash = 'roadmap'")
-    await wait(700)
-    const rv = JSON.parse(await js("JSON.stringify({ segs: document.querySelectorAll('.rm .rm-seg').length, cur: document.querySelectorAll('.rm .rm-seg.current').length, stages: document.querySelectorAll('.rm .rm-stage').length, done: document.querySelectorAll('.rm .t-step.done').length, src: [...document.querySelectorAll('.rm .t-src')].map((e) => e.textContent).join(), load: document.querySelectorAll('.rl-row').length, chain: document.querySelector('.rm .chain')?.innerText || '', nav: document.querySelector('[data-go=roadmap]')?.innerText || '' })"))
-    check('화면: 로드맵 타임라인 · 단계 · 체크 · 근거 노트 · 주간 부하 · 비전 연결', rv.segs === 2 && rv.cur === 1 && rv.stages === 2 && rv.done === 1 && /02주차_GC/.test(rv.src) && rv.load === 8 && /🎯 AI PM/.test(rv.chain) && /▶ 숫자 바꿔 예제/.test(rv.chain), JSON.stringify(rv))
-    await cap(m, 'roadmap.png')
-    await js("document.querySelector('[data-act=rm-week]').click()")
-    await wait(1500)
-    const pv = await js("[...document.querySelectorAll('#ask-preview input')].map((e) => e.value).join(' | ')")
-    check('화면: [이번 주 캘린더에 배치] → 입력 검토 미리보기', /숫자 바꿔 예제/.test(pv), pv.slice(0, 80))
-    await cap(m, 'roadmap-week.png')
-    await js("document.querySelector('[data-act=ask-cancel]')?.click(); 1")
-    rp = await js(`nf.proposeRoadmap({ replanId: ${JSON.stringify(rm1.id)} })`)
-    s = await snap()
-    check('다시 배분: 끝낸 조각을 알려 주고 제안만 (기존 로드맵 유지)', rp.ok && s.roadmapDraft.replan && /^REPLAN/.test(s.roadmapDraft.summary) && s.roadmapDraft.archived.length === 1 && s.roadmaps[0].id === rm1.id, s.roadmapDraft?.summary)
-    await js("location.hash = 'roadmap'")
-    await wait(500)
-    await cap(m, 'roadmap-draft.png')
-    r = await js('nf.decideRoadmap(true)')
-    s = await snap()
-    check('다시 배분 승인: 같은 과목 로드맵을 교체하고 끝낸 조각은 진행률에 남음', s.roadmaps.length === 1 && s.roadmaps[0].id !== rm1.id && s.roadmaps[0].progress.done === 1 && s.roadmaps[0].stages[0].title === '밀린 1순위', JSON.stringify(s.roadmaps[0].progress))
-    await w.webContents.executeJavaScript('refresh()')
-    await wait(300)
-    const wr = await w.webContents.executeJavaScript("document.querySelector('[data-act=rm-step]')?.innerText || ''")
-    await w.webContents.executeJavaScript("document.querySelector('[data-act=rm-step]').click()")
-    await wait(300)
-    s = await snap()
-    check('위젯: 로드맵 다음 조각 바로 체크', /GC 공식 3번 손으로/.test(wr) && s.roadmaps[0].progress.done === 2, wr)
-    await cap(w, 'widget-roadmap.png')
-    await js(`nf.removeRoadmap(${JSON.stringify(s.roadmaps[0].id)})`)
-
-    for (const c of s.memoCandidates) await js(`nf.decideCandidate(${JSON.stringify(c.id)}, 'drop')`)
-    await js("nf.saveMemo('')")
-    await js("nf.saveSettings({ study: { folder: '' } })")
-
-    // ── 11) 로그아웃 → 다시 잠금 ──
-    await js('nf.signOut()')
-    s = await snap()
-    check('로그아웃 → 다시 잠금', s.locked && s.events === undefined)
-
-    // ── 12) 간편 모드: 로그인 없이 iCal 로 시작 ──
-    r = await js("nf.simpleMode('notaurl')")
-    check('간편 모드: 잘못된 주소 거부', r.ok === false)
-    r = await js(`nf.simpleMode('${base}/cal.ics')`)
-    s = await snap()
-    check('간편 모드: 로그인 없이 열림 + iCal 일정', r.ok && !s.locked && !s.account && s.remote.events.some((e) => e.calendar === '공유'), `일정 ${r.count}개`)
-
-    await wait(600)
-    const file = (store.flush(), store._read()) /* 암호화돼 있어도 앱과 같은 방식으로 복호화 */
-    check('디스크 저장 + 로그아웃 시 토큰 삭제', file.events.some((e) => e.title === '테스트 마감') && file.account === null)
+    // ── 10) 토큰 지우기 → 보드도 지움 ──
+    await js("nf.setToken('')")
+    s = await js('nf.snapshot()')
+    check('토큰 지우면 보드도 지움', !s.hasToken && !s.board)
   } catch (e) {
     check('예외 없음', false, e.stack)
   }
 
   server.close()
-  const failed = results.filter((r) => !r.ok)
-  for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.info ? `  (${r.info})` : ''}`)
+  const failed = results.filter((x) => !x.ok)
+  for (const x of results) console.log(`${x.ok ? 'PASS' : 'FAIL'}  ${x.name}${x.info ? `  (${x.info})` : ''}`)
   console.log(`\nE2E: ${results.length - failed.length}/${results.length} 통과`)
   app.exit(failed.length ? 1 : 0)
 }

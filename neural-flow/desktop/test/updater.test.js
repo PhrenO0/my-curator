@@ -1,66 +1,10 @@
-// 보안 · 저장소 암호화 · 업데이트 단위 테스트 (node --test)
+// 자동 업데이트 단위 테스트 (node --test)
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const fs = require('fs')
-const os = require('os')
-const path = require('path')
-const http = require('http')
 const crypto = require('crypto')
-const { hashPin, verifyPin } = require('../main/security.js')
-
-test('PIN: scrypt 해시 · 같은 PIN 도 매번 다른 해시 · 틀린 PIN 거부', () => {
-  const h1 = hashPin('1234')
-  const h2 = hashPin('1234')
-  assert.notEqual(h1, h2)
-  assert.ok(!h1.includes('1234'))
-  assert.ok(verifyPin('1234', h1))
-  assert.ok(!verifyPin('1235', h1))
-  assert.ok(!verifyPin('1234', ''))
-  assert.ok(!verifyPin('1234', 'plain:1234'))
-})
-
-test('저장소 암호화: 디스크엔 암호문, 다시 읽으면 원래 데이터, 옛 평문 파일은 자동 전환', () => {
-  // 가짜 cipher (실제 앱은 OS 키체인 safeStorage)
-  const key = crypto.randomBytes(32)
-  const cipher = {
-    encrypt: (s) => {
-      const iv = crypto.randomBytes(12)
-      const c = crypto.createCipheriv('aes-256-gcm', key, iv)
-      const body = Buffer.concat([c.update(s, 'utf8'), c.final()])
-      return Buffer.concat([iv, c.getAuthTag(), body])
-    },
-    decrypt: (b) => {
-      const d = crypto.createDecipheriv('aes-256-gcm', key, b.subarray(0, 12))
-      d.setAuthTag(b.subarray(12, 28))
-      return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8')
-    },
-  }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-enc-'))
-  process.env.NF_STATE_JSON = path.join(dir, 'none.json')
-  delete require.cache[require.resolve('../main/store.js')]
-  const { Store, MAGIC } = require('../main/store.js')
-
-  // 옛 평문 파일
-  fs.writeFileSync(path.join(dir, 'neural-flow.json'), JSON.stringify({ events: [{ id: 'a', title: '비밀 일정', date: '2026-10-10' }] }))
-  const s = new Store(dir, { cipher }).load()
-  assert.equal(s.get().events[0].title, '비밀 일정')
-  s.flush()
-  const raw = fs.readFileSync(path.join(dir, 'neural-flow.json'), 'utf-8')
-  assert.ok(raw.startsWith(MAGIC), '암호화돼서 저장')
-  assert.ok(!raw.includes('비밀 일정'), '디스크에 평문 없음')
-  assert.ok(s.encrypted)
-  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, 'neural-flow.json')).mode & 0o777, 0o600)
-
-  const again = new Store(dir, { cipher }).load()
-  assert.equal(again.get().events[0].title, '비밀 일정')
-  assert.throws(() => new Store(dir).load(), /복호화 수단/)
-
-  // 암호화를 끄면 평문으로 돌아간다
-  again.get().settings.security.encryptData = false
-  again.flush()
-  assert.ok(!new Store(dir).encrypted)
-  delete process.env.NF_STATE_JSON
-})
+const fs = require('fs')
+const http = require('http')
+const path = require('path')
 
 // ── 업데이트 ──
 const { newer, pickAsset } = require('../main/updater.js')
